@@ -1,0 +1,149 @@
+[project]
+name = "mle-01-p3-team2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.3.0",
+    "jupyterlab>=4.6.2",
+    "pandas>=2.3,<3",
+    # parquet 읽기 엔진. fastparquet는 커뮤니티 보고서의 findings 같은 중첩 열을 None으로 읽으므로 pyarrow를 씁니다.
+    "pyarrow>=22",
+    "numpy>=2.3,<2.5",
+    "python-dotenv>=1.0",
+    # day46: 청킹 전략·RAPTOR
+    #   LangChain 쪽은 Document·분할기·Chroma·OpenAI 모델을 쓴다.
+    #   ParentDocumentRetriever 는 현재 langchain_classic 에 있다.
+    "langchain>=1.3.13",
+    "langchain-core>=1.6.5,<2",
+    "langchain-classic>=1.0.8",
+    #   0.4.2 에서 langchain_community.chat_models.vertexai 가 빠져 day59 의 ragas 0.4.3 import 가 실패한다.
+    #   원본 실습 환경도 0.4.1 로 교안을 실행했으므로 상한을 건다.
+    "langchain-community>=0.4,<0.4.2",
+    "langchain-openai>=1.3.5",
+    "langchain-chroma>=1.1",
+    "langchain-text-splitters>=1.1",
+    # day54의 배포 Chroma DB를 만든 버전을 유지한다.
+    "chromadb==1.5.9",
+    #   PyPDFLoader 가 실제 PDF 를 읽는다(langchain-community 는 pypdf 를 필수로 걸지 않는다).
+    "pypdf>=6.0",
+    #   Semantic·Sentence Window·Auto-merging 은 LlamaIndex 공식 파서를 쓴다.
+    #   Auto-merging 은 잎 노드를 Chroma 에 넣는다(llama_index.vector_stores.chroma).
+    #   세 패키지는 버전 조합이 맞아야 LangchainEmbedding·ChromaVectorStore 연결이 동작해 고정한다.
+    "llama-index-core==0.14.24",
+    "llama-index-embeddings-langchain==0.6.0",
+    "llama-index-vector-stores-chroma==0.6.0",
+    #   RAPTOR 의 군집화(KMeans)와 벡터 정규화.
+    "scikit-learn>=1.5",
+    # day47: 하이브리드 검색·질의 변환
+    #   BM25 토큰화는 Kiwi 형태소 분석이다. 버전이 바뀌면 토큰이 달라져 교안의 BM25 수치가 흔들려 고정한다.
+    "kiwipiepy==0.23.2",
+    #   아래 둘은 노트북에 import 가 없지만 실행 중에 불린다. 빠지면 그 셀에서 ImportError 가 난다.
+    #   BM25Retriever → rank_bm25, SelfQueryRetriever 의 조건 파서 → lark.
+    "rank-bm25>=0.2.2",
+    "lark>=1.3",
+    #   Self-Query·질의 분해의 구조화 출력 스키마(BaseModel·Field)를 직접 import 한다.
+    "pydantic>=2.13",
+    #   교안 03 의 Jev(Noul·Choice·Score) 공식 SDK. 교안이 이 버전 API 로 쓰였다.
+    "typesafe-sdk==0.7.1",
+    # day48: 리랭킹·컨텍스트 압축
+    #   Cross-Encoder 리랭커(Qwen3-Reranker-0.6B)는 HuggingFaceCrossEncoder 가 sentence-transformers 로 돌린다.
+    #   ColBERT 비교는 FlagEmbedding 의 BGEM3FlagModel 을 쓴다. 두 모델 가중치는 huggingface_hub 로 미리 받는다.
+    #   교안이 이 조합으로 점수·순위를 확인했으므로 버전을 고정한다.
+    "sentence-transformers==6.1.0",
+    "transformers==5.17.0",
+    "torch==2.14.0",
+    "FlagEmbedding==1.4.2",
+    "huggingface-hub>=1.0",
+    # day49: Graph·Vector 하이브리드 검색과 Jev 언어 판단
+    "neo4j==6.2.0",
+    "neo4j-graphrag==1.18.0",
+    "langchain-neo4j==0.10.0",
+    "langchain-typesafe==0.0.1a3",
+    # day50: State·노드·조건부 엣지와 메시지 리듀서
+    "langgraph>=1,<2",
+    "typing-extensions>=4.15",
+    # day51: SQLite 체크포인터와 여행 정보 HTTP 조회
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "requests>=2.32,<3",
+    # day52: Mem0 기억 관리·Qdrant 저장소·노트북 위젯
+    "mem0ai[nlp]==2.2.1",
+    # Mem0의 extras는 langchain-core<1을 요구한다. BM25 의존성만 개별 설치한다.
+    "fastembed==0.8.0",
+    # spaCy 모델도 uv로 설치해 첫 실행 시 pip를 통한 자동 다운로드를 피한다.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "qdrant-client==1.18.0",
+    "sqlite-vec==0.1.9",
+    "ipywidgets>=8,<9",
+    # day54: 노트북에서 Image·Markdown·display를 직접 사용한다.
+    "ipython>=9.17.1,<10",
+    # day55: 멀티에이전트 협업. 종합실습은 MCP 서버의 도구를 에이전트에 붙이고,
+    #   정답 폴더의 테스트는 pytest 와 pytest-asyncio 로 노드를 확인한다.
+    #   MCP 서버 자체는 npx·uvx 로 따로 띄우므로 여기에는 클라이언트 쪽만 둔다.
+    "langchain-mcp-adapters==0.3.2",
+    "mcp>=1.30,<2",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    # day56: Langfuse 로 에이전트 실행을 기록한다. CallbackHandler 와 trace 조회 방식이
+    #   이 버전 API 로 쓰였으므로 고정한다.
+    "langfuse==4.14.0",
+    #   교안이 httpx 를 직접 import 한다(openai·langfuse 로도 깔리지만 직접 쓰는 것은 적는다).
+    "httpx>=0.28",
+    # day57: GraphRAG 변형 비교(Microsoft GraphRAG·LightRAG 공식 패키지)
+    #   graphrag 3.1.1 부터는 pandas 3 을 요구해 이 저장소(pandas<3)와 충돌하므로 3.1.0 에 고정한다.
+    #   graphrag 3.1.0 이 litellm 을 고정해 openai 는 2.x 로 잠긴다.
+    "graphrag==3.1.0",
+    "lightrag-hku==1.5.7",
+    #   교안 01·02 색인 그래프 시각화(HTML). 리랭커·Jev 는 day48·day47 의존성을 그대로 쓴다.
+    "pyvis>=0.3.2",
+    #   교안이 litellm(모델 호출 설정)과 networkx(색인 그래프)를 직접 import 한다. graphrag 로도 깔리지만 직접 쓰는 것은 적는다.
+    "litellm>=1.86",
+    "networkx>=3.6",
+    # day58: RAG 아키텍처 설계
+    #   Supabase(PostgreSQL)에 SQL 을 직접 보낸다(DDL·JOIN·SET·용량 함수).
+    "psycopg2-binary>=2.9.12",
+    #   OpenAI 토큰 수로 임베딩 비용을 계산한다. langchain-openai 로도 깔리지만 교안이 직접 import 한다.
+    "tiktoken>=0.13",
+    #   교안 02 가 KURE-v1 을 LangChain 검색기(Chroma)에 넣으려고 HuggingFaceEmbeddings 를 직접 import 한다.
+    "langchain-huggingface>=1.2.2",
+    # day59: LLM 평가와 RAGAS
+    #   교안이 ragas.metrics.collections·ascore·llm_factory(0.4 API)로 쓰였으므로 고정한다.
+    #   평가용 LLM 은 OpenAI SDK 의 AsyncOpenAI 를 직접 import 한다.
+    "ragas==0.4.3",
+    "openai>=2,<3",
+    #   평가 작업을 동시에 실행할 때 진행 막대를 보여 주는 tqdm_asyncio 를 직접 import 한다(ragas 가 함께 설치하지만 직접 선언한다).
+    "tqdm>=4.66",
+    # day60: LLM-as-Judge 와 DeepEval. 부록의 JevEval(4.2.5부터)·PromptOptimizer 를 확인한 버전으로 고정한다.
+    "deepeval==4.2.9",
+    # day61: 평가 자동화. 평가 기록·실행 기록(trace)·화면 서버를 MLflow 이 버전 API(genai.evaluate·@scorer)로 썼으므로 고정한다.
+    #   mlflow 가 cryptography<49 를 요구해 cryptography 가 50.0.2 에서 48.0.1 로 내려간다.
+    "mlflow==3.14.0",
+    #   부록 02 가 워크플로 YAML 을 읽어 설정을 확인한다(yaml.load).
+    "pyyaml>=6",
+    # day62: 가드레일. NeMo Guardrails 대화 레일(Colang 1.0)·RunnableRails 를 이 버전 API 로 썼다.
+    #   0.24 는 self-check 반환형이 바뀌어 다음 단원의 0.23식 흐름이 깨지므로 0.23.0 에 고정한다.
+    "nemoguardrails==0.23.0",
+    # day63: Rails 구성·다층 방어. 출력 검증 층을 Guardrails AI 이 버전 API(사용자 정의 검증기·on_fail)로 썼다.
+    #   함께 설치되는 typer 가 낮은 버전으로 바뀌어 hf 명령줄 도구가 동작하지 않을 수 있다(모델은 파이썬 코드로 받는다).
+    "guardrails-ai==0.11.0",
+    #   교안 02·과제 02 준비 셀이 분류 모델 zip(1.1GB·3.0GB)을 구글 드라이브에서 받는다.
+    "gdown>=6.4.2",
+    #   교안 02 5-4 가 Guardrails Hub 의 모델 검증기 두 개를 쓴다(공개 PyPI 패키지, 토큰 불필요).
+    #   GuardrailsPII 는 GLiNER 모델과 Presidio 를 쓰고, Presidio 가 시작할 때 영어 spaCy 모델(en_core_web_lg)을 읽는다.
+    "guardrails-ai-guardrails-pii==1.0.8",
+    "guardrails-ai-toxic-language==0.0.2",
+    "en-core-web-lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl",
+    # day64: 루나 팬 서비스 프로젝트(.py). 배포 환경 검사는 노트북만 읽으므로 프로젝트 코드가 직접 import 하는 것을 적는다.
+    #   채팅 화면(Streamlit)과 공연장 지도(pydeck), .env 설정 읽기(pydantic-settings), 비동기 체크포인터(aiosqlite), 팬아트 그림 처리(Pillow).
+    #   채팅 화면은 원본 실습 환경에서 실행해 본 버전으로 고정한다.
+    "streamlit==1.59.1",
+    "pydeck>=0.9.3",
+    "pydantic-settings>=2.14",
+    "aiosqlite>=0.22",
+    "pillow>=12",
+]
+
+[tool.uv]
+# Windows 수업 PC에서 wheel 전용 패키지도 설치할 수 있도록 해석한다.
+required-environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'"]
