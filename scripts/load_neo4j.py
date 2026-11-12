@@ -1,8 +1,7 @@
-"""Load the processed entity/relation graph into Neo4j.
+"""전처리된 엔터티·관계 그래프를 Neo4j에 적재합니다.
 
-The loader is intentionally idempotent: project-provided entity_id and
-relation_id values are used as stable keys, so re-running it does not create
-duplicate graph data.
+프로젝트에서 제공한 entity_id와 relation_id를 고유 키로 사용하므로,
+스크립트를 다시 실행해도 그래프 데이터가 중복 생성되지 않습니다.
 """
 
 from __future__ import annotations
