@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from scripts.load_neo4j import load_records, validate_records
+from scripts.indexing.load_neo4j import load_records, validate_records
 
 
 def test_processed_graph_has_expected_counts_and_resolved_references():

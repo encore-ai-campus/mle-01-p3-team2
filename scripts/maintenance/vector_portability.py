@@ -17,7 +17,8 @@ from typing import Any
 import numpy as np
 
 
-DEFAULT_ARCHIVE = Path(__file__).resolve().parent / "data" / "portable" / "chunk_vectors_bge_m3.zip"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_ARCHIVE = PROJECT_ROOT / "data" / "portable" / "chunk_vectors_bge_m3.zip"
 DEFAULT_MODEL = "BAAI/bge-m3"
 DEFAULT_DIMENSION = 1024
 INDEX_NAME = "chunk_embedding"

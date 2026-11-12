@@ -1,4 +1,4 @@
-from retrievers.router import JevQuestionRouter, QuestionRouter
+from src.retrievers.router import JevQuestionRouter, QuestionRouter
 
 
 def test_router_selects_graph_for_relationship_question():

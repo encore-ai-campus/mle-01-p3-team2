@@ -2,8 +2,8 @@ import unittest
 
 import numpy as np
 
-from vector_retriever import VectorIndex
-from search_result import SearchResult
+from src.retrievers.search_result import SearchResult
+from src.retrievers.vector_retriever import VectorIndex
 
 
 class FakeDriver:
@@ -29,7 +29,7 @@ class RecordingEmbedder:
 class VectorIndexContractTests(unittest.TestCase):
     def test_vector_index_class_is_available(self):
         try:
-            from vector_retriever import VectorIndex
+            from src.retrievers.vector_retriever import VectorIndex
         except ModuleNotFoundError:
             VectorIndex = None
 

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 
-PROJECT_ROOT = Path(r"C:\Users\Playdata\Desktop\mle-01-p3-team2")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "evaluation"
 

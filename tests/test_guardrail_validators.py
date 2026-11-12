@@ -1,10 +1,10 @@
-from search_result import SearchResult
+from src.retrievers.search_result import SearchResult
 
-from guardrails_core.contracts import GuardrailRequest
-from guardrails_core.evidence_validator import validate_evidence
-from guardrails_core.output_validator import validate_output
-from guardrails_core.pesticide_validator import validate_pesticide
-from guardrails_core.pipeline import validate_request
+from src.guardrails.contracts import GuardrailRequest
+from src.guardrails.evidence_validator import validate_evidence
+from src.guardrails.output_validator import validate_output
+from src.guardrails.pesticide_validator import validate_pesticide
+from src.guardrails.pipeline import validate_request
 
 
 def _valid_result() -> SearchResult:
@@ -308,7 +308,7 @@ def test_empty_expected_fact_returns_fallback():
 def test_missing_expected_facts_uses_llm_judge(monkeypatch):
     """expected_facts가 없어도 Judge 검증을 통해 답변을 허용한다."""
 
-    from guardrails_core.contracts import ValidationResult
+    from src.guardrails.contracts import ValidationResult
 
     def mock_judge(question, answer, evidence):
         assert question == "질문"
@@ -323,7 +323,7 @@ def test_missing_expected_facts_uses_llm_judge(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "guardrails_core.output_validator._judge_with_llm",
+        "src.guardrails.output_validator._judge_with_llm",
         mock_judge,
     )
 

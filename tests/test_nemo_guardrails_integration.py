@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
 
-from nemo_guardrails import load_config
-from nemo_guardrails.actions import validate_graph_rag_response
+from src.guardrails.nemo import load_config
+from src.guardrails.nemo.actions import validate_graph_rag_response
 
 
 def _valid_payload() -> dict:
