@@ -1,0 +1,7 @@
+colang_version: "1.0"
+models: []
+
+rails:
+  output:
+    flows:
+      - validate graph rag output
