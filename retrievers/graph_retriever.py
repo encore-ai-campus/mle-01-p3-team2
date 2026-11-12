@@ -7,7 +7,7 @@ import re
 from typing import Any, Iterable, Sequence
 
 from neo4j import Driver, GraphDatabase
-from .models import SearchResult
+from search_result import SearchResult
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")

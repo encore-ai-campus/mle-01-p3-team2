@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from vector_retriever import VectorIndex
+from search_result import SearchResult
 
 
 class FakeDriver:
@@ -160,6 +161,32 @@ class VectorIndexContractTests(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(ValueError, "finite, nonzero"):
                     index.embed_question("마늘")
+
+    def test_vector_search_returns_shared_search_result_contract(self):
+        driver = FakeDriver([{
+            "chunk_id": "CHK_1",
+            "source_id": "SRC_1",
+            "evidence_id": "EVD_1",
+            "text": "마늘은 적합 지역에서 재배한다.",
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_dimension": 2,
+            "source_official": True,
+            "score": 0.91,
+        }])
+        index = VectorIndex(
+            driver,
+            RecordingEmbedder([[3.0, 4.0]]),
+            dimension=2,
+        )
+
+        result = index._search_verified("마늘 재배", k=1)[0]
+
+        self.assertIsInstance(result, SearchResult)
+        self.assertEqual(result.source, "vector")
+        self.assertEqual(result.score, 0.91)
+        self.assertIsNone(result.path)
+        self.assertIsNone(result.relation_types)
+        self.assertEqual(result.chunk_ids, ["CHK_1"])
 
 
 if __name__ == "__main__":
