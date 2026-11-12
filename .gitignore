@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated vector baseline artifacts
+data/vector_index/
+data/portable/
+
+# Local runtime and Hugging Face model cache
+.venv/
+.hf-cache/
