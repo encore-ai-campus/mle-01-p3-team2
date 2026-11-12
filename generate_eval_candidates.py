@@ -676,7 +676,7 @@ def main():
     parser.add_argument("--vector", type=int, default=20)
     parser.add_argument("--graph", type=int, default=15)
     parser.add_argument("--hybrid", type=int, default=15)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=43)
     parser.add_argument("--quality-threshold", type=float, default=0.8)
     parser.add_argument("--max-quality-retries", type=int, default=2)
     parser.add_argument(
