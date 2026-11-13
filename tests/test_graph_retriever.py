@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from retrievers.graph_retriever import GraphRetriever, graph_search, path_to_result
+from src.retrievers.graph_retriever import GraphRetriever, graph_search, path_to_result
 
 
 class FakeNode(dict):

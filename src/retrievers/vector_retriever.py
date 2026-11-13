@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from search_result import SearchResult
+from .search_result import SearchResult
 
 DEFAULT_INDEX_NAME = "chunk_embedding"
 DEFAULT_MODEL_NAME = "BAAI/bge-m3"

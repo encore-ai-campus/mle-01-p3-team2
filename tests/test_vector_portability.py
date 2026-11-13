@@ -3,7 +3,12 @@ import unittest
 from pathlib import Path
 from zipfile import ZipFile
 
-from vector_portability import iter_portable_rows, restore_portable, verify_portable, write_portable
+from scripts.maintenance.vector_portability import (
+    iter_portable_rows,
+    restore_portable,
+    verify_portable,
+    write_portable,
+)
 
 
 class PortableVectorTests(unittest.TestCase):

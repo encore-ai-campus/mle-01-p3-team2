@@ -1,6 +1,6 @@
-from retrievers.router import QuestionRouter
-from search_result import SearchResult
-from supervisor.graph import build_supervisor
+from src.retrievers.router import QuestionRouter
+from src.retrievers.search_result import SearchResult
+from src.supervisor.graph import build_supervisor
 
 
 def _graph_result():

@@ -11,7 +11,19 @@ from unittest.mock import patch
 
 import numpy as np
 
-from vector_baseline import DEFAULT_MODEL, VectorIndex, build_index, build_neo4j_index, evaluate, iter_embedding_batches, load_chunks, load_source_official, main, store_chunk_embeddings, store_chunk_metadata
+from scripts.indexing.build_vector_index import (
+    DEFAULT_MODEL,
+    VectorIndex,
+    build_index,
+    build_neo4j_index,
+    evaluate,
+    iter_embedding_batches,
+    load_chunks,
+    load_source_official,
+    main,
+    store_chunk_embeddings,
+    store_chunk_metadata,
+)
 
 
 class FakeEmbedder:

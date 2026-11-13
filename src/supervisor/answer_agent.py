@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from retrievers.hybrid_retriever import build_context
-from search_result import SearchResult
+from src.retrievers.hybrid_retriever import build_context
+from src.retrievers.search_result import SearchResult
 
 ANSWER_MODEL = "gpt-5.6-luna"
 

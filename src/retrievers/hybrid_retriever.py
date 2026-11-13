@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from search_result import SearchResult
+from .search_result import SearchResult
 
 
 def _result_key(result: SearchResult) -> tuple[str, ...]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from search_result import SearchResult
+from src.retrievers.search_result import SearchResult
 
 
 class GraphState(TypedDict, total=False):

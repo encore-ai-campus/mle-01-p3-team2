@@ -1,5 +1,5 @@
-from retrievers.hybrid_retriever import build_context, hybrid_search, merge_results
-from search_result import SearchResult
+from src.retrievers.hybrid_retriever import build_context, hybrid_search, merge_results
+from src.retrievers.search_result import SearchResult
 
 
 def _graph_result(text="마늘 → 대서마늘 → 남부 지역"):

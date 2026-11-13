@@ -14,10 +14,11 @@ from typing import Protocol
 import numpy as np
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODEL = "BAAI/bge-m3"
 DEFAULT_BATCH_SIZE = 4
-DEFAULT_CHUNKS_PATH = Path(__file__).resolve().parent / "data" / "processed" / "chunks.jsonl"
-DEFAULT_SOURCE_REGISTRY_PATH = Path(__file__).resolve().parent / "data" / "processed" / "source_registry.jsonl"
+DEFAULT_CHUNKS_PATH = PROJECT_ROOT / "data" / "processed" / "chunks.jsonl"
+DEFAULT_SOURCE_REGISTRY_PATH = PROJECT_ROOT / "data" / "processed" / "source_registry.jsonl"
 
 
 class Embedder(Protocol):
@@ -260,7 +261,8 @@ def store_chunk_metadata(
         "UNWIND $rows AS row "
         "MERGE (c:Chunk {chunk_id: row.chunk_id}) "
         "SET c.source_id = row.source_id, c.evidence_id = row.evidence_id, "
-        "c.raw_text = row.raw_text"
+        "c.raw_text = row.raw_text, "
+        "c.embedding_dimension = size(c.embedding)"
     )
     if source_official is not None:
         query += ", c.source_official = row.source_official"
@@ -317,7 +319,9 @@ class VectorIndex:
     def load(cls, index_dir: str | Path) -> VectorIndex:
         root = Path(index_dir)
         manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-        vectors = np.load(root / "vectors.npy", mmap_mode="r", allow_pickle=False)
+        # Windows에서는 memmap이 파일 핸들을 유지해 인덱스 폴더를 바로
+        # 삭제하거나 교체할 수 없다. 파일을 메모리로 읽어 핸들을 닫는다.
+        vectors = np.load(root / "vectors.npy", allow_pickle=False)
         metadata = list(_jsonl(root / "metadata.jsonl"))
         index = cls(vectors, metadata, manifest)
         for filename, key in (("vectors.npy", "vectors_sha256"), ("metadata.jsonl", "metadata_sha256")):

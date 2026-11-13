@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from neo4j import Driver, GraphDatabase
 
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = ROOT / "data" / "processed"
 
 
