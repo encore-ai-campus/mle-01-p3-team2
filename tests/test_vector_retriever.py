@@ -3,7 +3,8 @@ import unittest
 import numpy as np
 
 from src.retrievers.search_result import SearchResult
-from src.retrievers.vector_retriever import VectorIndex
+from src.retrievers.vector_retriever import VectorIndex, vector_record_to_result
+from src.retrievers import vector_search
 
 
 class FakeDriver:
@@ -27,6 +28,72 @@ class RecordingEmbedder:
 
 
 class VectorIndexContractTests(unittest.TestCase):
+    def test_vector_search_runs_index_and_returns_shared_results(self):
+        class SearchDriver:
+            def __init__(self):
+                self.calls = []
+
+            def execute_query(self, query, **kwargs):
+                self.calls.append((query, kwargs))
+                if query.startswith("SHOW VECTOR INDEXES"):
+                    return [{
+                        "name": "chunk_embedding",
+                        "state": "ONLINE",
+                        "labelsOrTypes": ["Chunk"],
+                        "properties": ["embedding"],
+                        "options": {"indexConfig": {
+                            "vector.dimensions": 2,
+                            "vector.similarity_function": "COSINE",
+                        }},
+                    }], None, None
+                return [{
+                    "chunk_id": "CHK_1",
+                    "source_id": "SRC_1",
+                    "evidence_id": "EVD_1",
+                    "text": "Original passage",
+                    "score": 0.91,
+                }], None, None
+
+        driver = SearchDriver()
+        index = VectorIndex(driver, RecordingEmbedder([[3.0, 4.0]]), dimension=2)
+
+        results = vector_search("How to grow?", index=index, k=1)
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], SearchResult)
+        self.assertEqual(results[0].chunk_id, "CHK_1")
+        self.assertEqual(results[0].evidence_id, "EVD_1")
+        self.assertEqual(results[0].score, 0.91)
+        self.assertEqual(len(driver.calls), 2)
+        self.assertEqual(driver.calls[1][1]["k"], 1)
+
+    def test_vector_record_to_result_maps_ids_score_and_metadata(self):
+        result = vector_record_to_result({
+            "chunk_id": "CHK_1",
+            "source_id": "SRC_1",
+            "evidence_id": "EVD_1",
+            "text": "Original passage",
+            "score": 0.91,
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_dimension": 1024,
+            "source_official": True,
+        })
+
+        self.assertIsInstance(result, SearchResult)
+        self.assertEqual(result.source, "vector")
+        self.assertEqual(result.text, "Original passage")
+        self.assertEqual(result.score, 0.91)
+        self.assertEqual(result.evidence_id, "EVD_1")
+        self.assertEqual(result.chunk_id, "CHK_1")
+        self.assertIsNone(result.path_nodes)
+        self.assertIsNone(result.path_edges)
+        self.assertIsNone(result.hop_count)
+        self.assertEqual(result.evidence_ids, ["EVD_1"])
+        self.assertEqual(result.chunk_ids, ["CHK_1"])
+        self.assertEqual(result.source_ids, ["SRC_1"])
+        self.assertEqual(result.metadata["source_official"], True)
+        self.assertEqual(result.warnings, [])
+
     def test_vector_index_class_is_available(self):
         try:
             from src.retrievers.vector_retriever import VectorIndex
