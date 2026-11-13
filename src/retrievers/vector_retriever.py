@@ -27,6 +27,31 @@ class Embedder(Protocol):
     def encode(self, texts: list[str], **kwargs: object) -> np.ndarray: ...
 
 
+def vector_record_to_result(record: Any) -> SearchResult:
+    """Convert one Neo4j vector hit to the shared retrieval contract."""
+    score = record.get("score")
+    if score is None or not math.isfinite(float(score)):
+        raise ValueError("Neo4j returned a non-finite vector score")
+
+    chunk_id = record.get("chunk_id")
+    source_id = record.get("source_id")
+    evidence_id = record.get("evidence_id")
+    raw_text = record.get("text")
+    return SearchResult(
+        source="vector",
+        text=raw_text if isinstance(raw_text, str) else "",
+        score=float(score),
+        evidence_id=str(evidence_id) if evidence_id else None,
+        chunk_id=str(chunk_id) if chunk_id else None,
+        source_ids=[str(source_id)] if source_id else [],
+        metadata={
+            "embedding_model": record.get("embedding_model"),
+            "embedding_dimension": record.get("embedding_dimension"),
+            "source_official": record.get("source_official"),
+        },
+    )
+
+
 class VectorIndex:
     """Query a Neo4j Chunk cosine index and validate its configuration."""
 
@@ -170,6 +195,13 @@ class VectorIndex:
         # Single production requests always check the current index state.
         self.verify_ready()
         return self._search_verified(question, k)
+
+
+def vector_search(
+    question: str, *, index: VectorIndex, k: int = 5
+) -> list[SearchResult]:
+    """Search the Neo4j vector index and return shared SearchResult hits."""
+    return index.search(question, k=k)
 
 
 def _validate_k(k: int) -> None:
