@@ -1,0 +1,465 @@
+{
+  "config": {
+    "top_k": 5,
+    "retry_top_k": 10,
+    "score_thresholds": {
+      "faithfulness": 0.8,
+      "answer_relevancy": 0.8,
+      "answer_correctness": 0.8,
+      "context_precision": 0.8,
+      "context_recall": 0.8,
+      "context_relevancy": 0.8,
+      "hit_at_k": 1.0
+    },
+    "output_path": "data/evaluation/rag_eval_results_v2.jsonl",
+    "summary_path": "data/evaluation/rag_eval_summary_v2.json"
+  },
+  "metrics": {
+    "faithfulness": {
+      "score": null,
+      "threshold": 0.8
+    },
+    "answer_relevancy": {
+      "score": null,
+      "threshold": 0.8
+    },
+    "answer_correctness": {
+      "score": null,
+      "threshold": 0.8
+    },
+    "context_precision": {
+      "score": null,
+      "threshold": 0.8
+    },
+    "context_recall": {
+      "score": null,
+      "threshold": 0.8
+    },
+    "context_relevancy": {
+      "score": null,
+      "threshold": 0.8
+    }
+  },
+  "id_metrics": {
+    "hit_at_k": 0.3880597014925373,
+    "precision_at_k": 0.1970149253731343,
+    "recall_at_k": 0.3880597014925373,
+    "mrr_at_k": 0.1890547263681592,
+    "average_precision_at_k": 0.1890547263681592
+  },
+  "overall_pass": false,
+  "pass_rate": 0.14925373134328357,
+  "failure_counts": {
+    "VALID_ABSTENTION": 10,
+    "RETRIEVAL_AND_GENERATION_FAILURE": 41,
+    "GENERATION_FAILURE": 16
+  },
+  "by_question_type": {
+    "comparison": {
+      "count": 1,
+      "pass_rate": 0.0,
+      "answer_correctness": null
+    },
+    "fact": {
+      "count": 18,
+      "pass_rate": 0.0,
+      "answer_correctness": null
+    },
+    "multi_hop": {
+      "count": 19,
+      "pass_rate": 0.0,
+      "answer_correctness": null
+    },
+    "out_of_scope": {
+      "count": 10,
+      "pass_rate": 1.0,
+      "answer_correctness": null
+    },
+    "relation": {
+      "count": 19,
+      "pass_rate": 0.0,
+      "answer_correctness": null
+    }
+  },
+  "by_difficulty": {
+    "easy": {
+      "count": 42,
+      "pass_rate": 0.14285714285714285,
+      "answer_correctness": null
+    },
+    "medium": {
+      "count": 25,
+      "pass_rate": 0.16,
+      "answer_correctness": null
+    }
+  },
+  "by_expected_behavior": {
+    "ANSWER": {
+      "count": 27,
+      "pass_rate": 0.0,
+      "answer_correctness": null
+    },
+    "ANSWER_WITH_WARNING": {
+      "count": 30,
+      "pass_rate": 0.0,
+      "answer_correctness": null
+    },
+    "REJECT": {
+      "count": 10,
+      "pass_rate": 1.0,
+      "answer_correctness": null
+    }
+  },
+  "lowest_score_cases": [
+    {
+      "case_id": "GS001",
+      "question": "파이썬으로 퀵정렬 알고리즘을 구현해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "easy",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS002",
+      "question": "비트코인 가격이 다음 달에 오를지 예측해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "easy",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS003",
+      "question": "서울에서 데이트하기 좋은 맛집을 추천해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "easy",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS004",
+      "question": "노트북을 새로 사려고 하는데 게임용 제품을 추천해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "easy",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS005",
+      "question": "오늘 프로야구 경기 결과를 알려주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "easy",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS006",
+      "question": "전세 계약을 해지할 때 필요한 법적 절차를 설명해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "easy",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS007",
+      "question": "배추를 주인공으로 한 어린이용 게임 캐릭터 설정을 만들어 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "medium",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS008",
+      "question": "농업 관련 주식 중 단기간에 수익이 날 종목을 추천해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "medium",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS009",
+      "question": "마늘을 소재로 한 공포 영화의 시놉시스를 작성해 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "medium",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    },
+    {
+      "case_id": "GS010",
+      "question": "고추 사진을 이용해 SNS 광고 포스터 문구를 만들어 주세요.",
+      "question_type": "out_of_scope",
+      "difficulty": "medium",
+      "expected_behavior": "REJECT",
+      "response_status": "INSUFFICIENT_EVIDENCE",
+      "answer": "질문 범위를 벗어나 확인할 수 없습니다.",
+      "citations": [],
+      "retrieved_chunk_ids": [],
+      "expected_chunk_ids": [],
+      "ragas": {
+        "faithfulness": null,
+        "answer_relevancy": null,
+        "answer_correctness": null,
+        "context_precision": null,
+        "context_recall": null,
+        "context_relevancy": null
+      },
+      "id_metrics": {
+        "hit_at_k": 1.0,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "mrr_at_k": 0.0,
+        "average_precision_at_k": 0.0
+      },
+      "citation_validation": {
+        "passed": true,
+        "checks": []
+      },
+      "failure_cause": "VALID_ABSTENTION",
+      "passed": true,
+      "retrieved_source_texts": [],
+      "expected_source_texts": []
+    }
+  ]
+}
