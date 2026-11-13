@@ -115,3 +115,36 @@ def test_render_block_exposes_only_the_evidence_id_handle():
     assert "배추 → 플루아지남 → 반쪽시들음병" in block
     # chunk_id가 프롬프트에 새면 LLM이 잘못된 핸들을 인용합니다.
     assert "CHK_" not in block
+
+def test_graph_evidence_links_each_citation_to_its_own_hop():
+    result = _graph_result()
+    result.path_edges = [
+        {"hop": 1, "relation_id": "REL_1", "evidence_ids": ["EVD_1"], "original_chunks": [{"evidence_id": "EVD_1", "text": STORE["EVD_1"]["text"]}]},
+        {"hop": 2, "relation_id": "REL_2", "evidence_ids": ["EVD_2"], "original_chunks": [{"evidence_id": "EVD_2", "text": STORE["EVD_2"]["text"]}]},
+    ]
+
+    evidences, dropped = build_evidence([result], _lookup)
+
+    assert dropped == []
+    assert [e.relation_ids for e in evidences] == [["REL_1"], ["REL_2"]]
+    rendered = render_evidence_block(evidences)
+    assert "관계 ID: REL_1" in rendered
+    assert "관계 ID: REL_2" in rendered
+
+
+def test_shared_evidence_preserves_all_graph_paths_and_relation_ids():
+    first = _graph_result(("EVD_1",))
+    first.path_edges = [{"hop": 1, "relation_id": "REL_1", "evidence_ids": ["EVD_1"]},
+                        {"hop": 2, "relation_id": "REL_2", "evidence_ids": ["EVD_1"]}]
+    second = _graph_result(("EVD_1",))
+    second.path = ["배추", "다른 약제", "다른 병해"]
+    second.path_edges = [{"hop": 1, "relation_id": "REL_3", "evidence_ids": ["EVD_1"]},
+                         {"hop": 2, "relation_id": "REL_4", "evidence_ids": ["EVD_1"]}]
+
+    evidences, _ = build_evidence([first, second], _lookup)
+
+    assert len(evidences) == 1
+    assert evidences[0].relation_ids == ["REL_1", "REL_2", "REL_3", "REL_4"]
+    assert evidences[0].graph_paths == [first.path, second.path]
+    block = render_evidence_block(evidences)
+    assert "배추 → 다른 약제 → 다른 병해" in block

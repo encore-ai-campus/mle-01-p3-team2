@@ -1,6 +1,7 @@
 from src.retrievers.search_result import SearchResult
 from src.retrievers.answer import (Citation, CitedAnswer, Claim, Evidence, render_cited_answer)
 from src.supervisor.answer_agent import ANSWER_MODEL, AnswerAgent
+from src.supervisor.citation_verifier import AnswerReview
 
 def _evidence() -> Evidence:
     return Evidence(
@@ -145,6 +146,35 @@ def test_answer_agent_generates_structured_cited_answer():
 
     assert result == expected
     assert result.claims[0].citations[0].evidence_id == "EVD_1"
+
+
+def test_answer_agent_reviews_claim_support_with_structured_output():
+    expected = AnswerReview(
+        supported=True,
+        reason="인용 원문이 주장을 직접 뒷받침합니다.",
+    )
+
+    class FakeStructuredModel:
+        def invoke(self, prompt):
+            assert "주장: 중만생종은 중남부 내륙에 적합하다." in prompt
+            assert "EVD_1" in prompt
+            return expected
+
+    class FakeModel:
+        def with_structured_output(self, schema):
+            assert schema is AnswerReview
+            return FakeStructuredModel()
+
+    review = AnswerAgent(FakeModel()).review_support(
+        "중만생종은 중남부 내륙에 적합하다.",
+        [{
+            "evidence_id": "EVD_1",
+            "citation_quote": "중만생종의 재배 가능 지역은 중남부 내륙이다.",
+            "source_text": "중만생종의 재배 가능 지역은 중남부 내륙이다.",
+        }],
+    )
+
+    assert review == expected
 
 def test_answer_agent_returns_empty_claims_without_evidence():
     class FailIfCalledModel:

@@ -7,6 +7,15 @@ def test_router_selects_graph_for_relationship_question():
     assert decision.crop == "마늘"
 
 
+def test_router_selects_graph_for_variety_group_region_question():
+    decision = QuestionRouter().decide(
+        "중만생종 양파는 어느 지역에서 재배하기에 적합한가요?"
+    )
+
+    assert decision.route == "GRAPH"
+    assert decision.crop == "양파"
+
+
 def test_router_selects_hybrid_for_environment_and_management_question():
     decision = QuestionRouter().decide("저온다습한 환경에서 어떤 병해가 생기고 어떻게 예방하나요?")
     assert decision.route == "HYBRID"
