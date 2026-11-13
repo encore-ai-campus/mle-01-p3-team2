@@ -72,6 +72,8 @@ def build_supervisor(
             "warnings": list(decision.warnings),
             "retry_count": state.get("retry_count", 0),
             "max_retries": state.get("max_retries", max_retries),
+            'route_reason': decision.reason,
+            'initial_route_reason': decision.reason,
         }
 
     def retrieve_node(state: GraphState) -> dict[str, Any]:
@@ -98,7 +100,8 @@ def build_supervisor(
             results = []
         return {"results": results,
                 # 재시도가 일어나도 이전 시도의 검색 결과르 잃지 않도록 누적
-                "retrieved_results": [*state.get('retrieved_results', []), *results]
+                "retrieved_results": [*state.get('retrieved_results', []), *results],
+                'attemps': [*state.get('attemps', []), {'route': route, 'max_hops': max_hops, 'limit': result_limit, 'found': len(results)}],
                 }
 
     def verify_node(state: GraphState) -> dict[str, Any]:
@@ -138,10 +141,12 @@ def build_supervisor(
 
     def retry_node(state: GraphState) -> dict[str, Any]:
         # route만 HYBRID로 바꾸고, initial_route는 건드리지 않습니다.
-        # route_path에는 이동 이력을 덧붙여 어디서 넘어왔는지 남깁니다.
+        # route_path는 '경로가 바뀐 이력', 같은 경로로 재시도할 때는
+        # 덧붙이지 않음. 재시도 횟수는 retry_count()가 따로 셈
+        path = state.get('route_path', [])
         return {
             "route": "HYBRID",
-            "route_path": [*state.get("route_path", []), "HYBRID"],
+            "route_path": path if path and path[-1] == "HYBRID" else [*path, 'HYBRID'],
             "route_reason": "기존 검색 결과의 근거가 부족해 하이브리드 검색으로 재시도합니다.",
             "retry_count": state.get("retry_count", 0) + 1,
         }

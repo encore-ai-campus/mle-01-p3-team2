@@ -165,3 +165,39 @@ def test_supervisor_accumulates_retrieved_results_across_retries():
 
     assert state["retry_count"] == 1
     assert len(state["retrieved_results"]) == 2   # 두 시도 모두 보존
+
+def test_supervisor_does_not_duplicate_route_in_path_on_same_route_retry():
+    """처음부터 HYBRID인 문항이 재시도해도 route_path에 중복이 쌓이면 안 됩니다."""
+    insufficient = SearchResult(source="vector", text="근거 없음")
+
+    app = build_supervisor(
+        graph_search_fn=lambda question, **kwargs: [],
+        vector_search_fn=lambda question, **kwargs: [],
+        hybrid_search_fn=lambda question, **kwargs: [insufficient],
+        max_retries=1,
+    )
+    state = app.invoke(
+        {"question": "저온다습한 환경에서 어떤 병해가 생기고 어떻게 예방하나요?"}
+    )
+
+    assert state["initial_route"] == "HYBRID"
+    # fallback이 아니라 같은 경로 재시도이므로 길이가 1이어야 합니다.
+    assert state["route_path"] == ["HYBRID"]
+    # 재시도 사실은 retry_count로 확인합니다.
+    assert state["retry_count"] == 1
+
+
+def test_supervisor_route_path_records_only_route_changes_across_retries():
+    """재시도를 여러 번 해도 경로 전환은 한 번만 기록됩니다."""
+    insufficient = SearchResult(source="graph", text="근거 없음")
+
+    app = build_supervisor(
+        graph_search_fn=lambda question, **kwargs: [insufficient],
+        vector_search_fn=lambda question, **kwargs: [],
+        hybrid_search_fn=lambda question, **kwargs: [insufficient],
+        max_retries=2,
+    )
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["route_path"] == ["GRAPH", "HYBRID"]
+    assert state["retry_count"] == 2

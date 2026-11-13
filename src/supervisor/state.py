@@ -6,6 +6,8 @@ from typing import TypedDict
 
 from src.retrievers.search_result import SearchResult
 
+from typing import Any, TypedDict
+
 
 class GraphState(TypedDict, total=False):
     """검색·검증·답변 노드 사이에서 공유하는 상태입니다."""
@@ -36,3 +38,5 @@ class GraphState(TypedDict, total=False):
     # ANSWERED | WITHHELD | REJECTED
     final_status: str
     final_answer: str
+    # 시도별 기록. 예: [{"route": "GRAPH", "max_hops": 2, "found": 0}, ...]
+    attemps: list[dict[str, Any]]
