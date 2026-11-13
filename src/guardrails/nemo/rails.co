@@ -1,0 +1,8 @@
+define bot refuse to respond
+  "검색 근거가 부족하거나 검증되지 않아 답변을 제공할 수 없습니다. 공식 자료를 다시 확인해 주세요."
+
+define flow validate graph rag output
+  $result = execute validate_graph_rag_response
+  if not $result.allowed
+    bot refuse to respond
+    stop
