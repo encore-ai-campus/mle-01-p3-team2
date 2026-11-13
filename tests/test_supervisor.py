@@ -111,3 +111,57 @@ def test_supervisor_withhold_is_not_confused_with_reject():
     assert state["final_status"] == "WITHHELD"
     assert state["evidence_status"] == "INSUFFICIENT"
     assert state["route"] != "REJECT"
+
+def test_supervisor_keeps_retrieved_results_when_evidence_is_insufficient():
+    """검증에서 탈락해도 검색 원본은 남아야 Hit@K를 채점할 수 있습니다."""
+    retrieved = SearchResult(source="graph", text="근거 없음")
+
+    app = build_supervisor(
+        graph_search_fn=lambda question, **kwargs: [retrieved],
+        vector_search_fn=lambda question, **kwargs: [retrieved],
+        hybrid_search_fn=lambda question, **kwargs: [retrieved],
+        max_retries=0,
+    )
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["final_status"] == "WITHHELD"
+    assert state["results"] == []            # 답변에는 쓰지 않습니다
+    assert state["retrieved_results"]        # 채점용 원본은 남습니다
+    assert state["rejected_results"]   # 왜 걸러졌는지 추적할 수 있어야 합니다
+
+
+def test_supervisor_keeps_filtered_out_results_for_scoring_on_pass():
+    """검증을 통과해도 탈락한 결과가 채점 대상에서 빠지면 안 됩니다."""
+    usable = SearchResult(source="vector", text="공식 문서", chunk_ids=["CHK_1"])
+    unusable = SearchResult(source="graph", text="근거 없음")
+
+    app = build_supervisor(
+        graph_search_fn=lambda question, **kwargs: [usable, unusable],
+        vector_search_fn=lambda question, **kwargs: [],
+    )
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["evidence_status"] == "PASS"
+    assert len(state["results"]) == 1
+    assert len(state["retrieved_results"]) == 2
+
+
+def test_supervisor_accumulates_retrieved_results_across_retries():
+    first = SearchResult(source="graph", text="근거 없음")
+    second = SearchResult(source="vector", text="공식 문서", chunk_ids=["CHK_1"])
+    calls = {"n": 0}
+
+    def graph_search(question, **kwargs):
+        calls["n"] += 1
+        return [first]
+
+    app = build_supervisor(
+        graph_search_fn=graph_search,
+        vector_search_fn=lambda question, **kwargs: [],
+        hybrid_search_fn=lambda question, **kwargs: [second],
+        max_retries=1,
+    )
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["retry_count"] == 1
+    assert len(state["retrieved_results"]) == 2   # 두 시도 모두 보존
