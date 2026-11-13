@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from src.retrievers.search_result import SearchResult
-
-from typing import Any, TypedDict
 
 
 class GraphState(TypedDict, total=False):
@@ -40,3 +38,18 @@ class GraphState(TypedDict, total=False):
     final_answer: str
     # 시도별 기록. 예: [{"route": "GRAPH", "max_hops": 2, "found": 0}, ...]
     attemps: list[dict[str, Any]]
+
+    # Guardrails 연동용 추가 필드
+    guardrail_decision: str
+    guardrail_reason: str
+    pesticide_use_requested: bool
+    input_intent: str
+    dialog_action: str
+    retrieval_rejections: list[dict[str, object]]
+
+    product_name: str
+    target_pest: str
+
+    execution_decision: str
+    execution_reason: str
+    execution_record: dict[str, Any] | None

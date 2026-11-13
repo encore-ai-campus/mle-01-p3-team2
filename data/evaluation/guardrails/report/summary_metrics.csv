@@ -1,0 +1,5 @@
+﻿file,total,correct,wrong,tp,tn,fp,fn,precision,recall,fpr,fnr,accuracy
+input_rail_evaluation.csv,16,16,0,8,8,0,0,100.0,100.0,0.0,0.0,100.0
+input_rail_holdout.csv,16,16,0,8,8,0,0,100.0,100.0,0.0,0.0,100.0
+output_usage_rail_evaluation.csv,12,12,0,8,4,0,0,100.0,100.0,0.0,0.0,100.0
+output_usage_rail_holdout.csv,16,16,0,8,8,0,0,100.0,100.0,0.0,0.0,100.0

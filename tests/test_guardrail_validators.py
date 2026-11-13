@@ -92,7 +92,9 @@ def test_request_and_result_round_trip_to_dict():
     assert payload["details"]["checked_items"] == 1
 
 
-def test_verified_current_allows_pesticide_recommendation():
+def test_verified_current_without_official_evidence_blocks_recommendation():
+    """등록상태 표시만으로는 현재 농약 사용을 추천하지 않는다."""
+
     result = validate_pesticide(
         GuardrailRequest(
             question="마늘에 사용할 농약을 추천해 주세요.",
@@ -102,8 +104,9 @@ def test_verified_current_allows_pesticide_recommendation():
         )
     )
 
-    assert result.allowed is True
-    assert result.decision == "ALLOW"
+    assert result.allowed is False
+    assert result.decision == "BLOCK"
+    assert result.details["official_verified"] is False
 
 
 def test_unknown_status_blocks_pesticide_recommendation():

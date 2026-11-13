@@ -2,6 +2,7 @@ from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
 from src.supervisor.graph import build_supervisor
 from src.supervisor.graph import INSUFFICIENT_EVIDENCE_WARNING, build_supervisor
+from unittest.mock import patch
 
 
 def _graph_result():
@@ -27,6 +28,11 @@ def test_supervisor_routes_and_calls_graph_worker():
 
     app = build_supervisor(graph_search_fn=graph_search, vector_search_fn=vector_search)
     state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    print("\nGuardrails 결정:", state.get("guardrail_decision"))
+    print("Guardrails 사유:", state.get("guardrail_reason"))
+    print("최종 상태:", state.get("final_status"))
+    print("최종 답변:", state.get("final_answer"))
 
     assert state["route"] == "GRAPH"
     assert state["final_status"] == "ANSWERED"
@@ -78,16 +84,34 @@ def test_supervisor_withholds_after_retry_limit():
     assert state["evidence_status"] == "INSUFFICIENT"
     assert state["retry_count"] == 1
 
+
 def test_supervisor_rejects_out_of_scope_quesion_with_reject_status():
-    def unexpected_search(question, **kwargs): 
-        raise AssertionError("REJECT 질문은 검색을 실행하지 않아야 함")
+    """농업 범위를 벗어난 질문이 Router에서 거절되는지 확인."""
+
+    def unexpected_search(question, **kwargs):
+        raise AssertionError(
+            "REJECT 질문은 검색을 실행하지 않아야 함"
+        )
 
     app = build_supervisor(
         graph_search_fn=unexpected_search,
         vector_search_fn=unexpected_search,
         hybrid_search_fn=unexpected_search,
     )
-    state = app.invoke({'question': '서울에서 데이터하기 좋은 맛집을 추천해주세요.'})
+
+    # Router 자체의 거절 기능을 확인하기 위해
+    # 이 테스트에서만 NeMo 검사를 통과 처리한다.
+    with patch(
+        "src.guardrails.dialog_rail.check_nemo_dialog",
+        return_value=(True, "검사 통과"),
+    ):
+        state = app.invoke({
+            "question": "서울에서 데이터하기 좋은 맛집을 추천해주세요."
+        })
+
+    assert state["route"] == "REJECT"
+    assert state["final_status"] == "REJECTED"
+
 
     assert state['final_status'] == 'REJECTED'
     assert state['evidence_status'] == 'NOT_APPLICABLE'
