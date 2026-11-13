@@ -22,14 +22,59 @@ def test_answer_agent_fallback_preserves_graph_and_source_evidence():
     result = SearchResult(
         source="graph",
         text="마늘 → 대서마늘 → 남부 지역",
-        evidence_ids=["EVD_1"],
-        source_ids=["SRC_1"],
-        chunk_ids=["CHK_1"],
+        evidence_ids=["EVD_1", "EVD_2"],
+        source_ids=["SRC_1", "SRC_2"],
+        chunk_ids=["CHK_1", "CHK_2"],
         path=["마늘", "대서마늘", "남부 지역"],
-        relation_types=["HAS_VARIETY", "SUITABLE_FOR_REGION"],
+        relation_types=[
+            "HAS_VARIETY",
+            "SUITABLE_FOR_REGION",
+        ],
+        hop_count=2,
+        path_edges=[
+            {
+                "hop": 1,
+                "relation_id": "REL_1",
+                "relation_type": "HAS_VARIETY",
+                "from_entity_id": "ENT_GARLIC",
+                "to_entity_id": "ENT_VARIETY",
+                "evidence_ids": ["EVD_1"],
+                "chunk_ids": ["CHK_1"],
+                "source_ids": ["SRC_1"],
+                "original_chunks": [
+                    {
+                        "chunk_id": "CHK_1",
+                        "evidence_id": "EVD_1",
+                        "source_id": "SRC_1",
+                        "text": "대서마늘은 마늘의 한 품종이다.",
+                    }
+                ],
+            },
+            {
+                "hop": 2,
+                "relation_id": "REL_2",
+                "relation_type": "SUITABLE_FOR_REGION",
+                "from_entity_id": "ENT_VARIETY",
+                "to_entity_id": "ENT_SOUTH",
+                "evidence_ids": ["EVD_2"],
+                "chunk_ids": ["CHK_2"],
+                "source_ids": ["SRC_2"],
+                "original_chunks": [
+                    {
+                        "chunk_id": "CHK_2",
+                        "evidence_id": "EVD_2",
+                        "source_id": "SRC_2",
+                        "text": "대서마늘은 남부 지역 재배에 적합하다.",
+                    }
+                ],
+            },
+        ],
     )
 
-    answer = AnswerAgent().generate("마늘의 적합 지역은?", [result])
+    answer = AnswerAgent().generate(
+        "마늘의 적합 지역은?",
+        [result],
+    )
 
     assert "EVD_1" in answer
     assert "SRC_1" in answer

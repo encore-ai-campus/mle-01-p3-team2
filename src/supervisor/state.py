@@ -41,11 +41,19 @@ class GraphState(TypedDict, total=False):
     evidences: list[Evidence]
     dropped_evidences: list[dict[str, Any]]
     # 구조화된 답변 생성 결과
-    cited_answer: CitedAnswer
+    cited_answer: CitedAnswer | None
     # PASS | PARITAL | FAIL
     citation_status: str
     # CitationFailure.model_dump() 목록
-    citation_failure: list[dict[str, Any]]
+    citation_failures: list[dict[str, Any]]
     checked_claims: int
     supported_claims: int
-
+    citation_status: str
+    citation_failures: list[dict[str, Any]]
+    citation_conflicts: list[dict[str, Any]]
+    # 재검색에 실제로 사용할 확장 쿼리
+    search_query: str
+    # 인용 검증 실패로 재검색했는지 여부
+    retry_reason: str
+    # 최종 보류 사유
+    withhold_reason: str

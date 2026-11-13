@@ -1,7 +1,84 @@
+from src.retrievers.answer import (
+    Citation,
+    CitedAnswer,
+    Claim,
+)
 from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
-from src.supervisor.graph import build_supervisor
-from src.supervisor.graph import INSUFFICIENT_EVIDENCE_WARNING, build_supervisor
+from src.supervisor.citation_verifier import AnswerReview
+from src.supervisor.graph import (
+    INSUFFICIENT_EVIDENCE_WARNING,
+    build_supervisor,
+)
+
+def _evidence_lookup(
+    evidence_ids: list[str],
+) -> dict[str, dict]:
+    """Supervisor 테스트용 Evidence 조회 함수."""
+
+    return {
+        evidence_id: {
+            "evidence_id": evidence_id,
+            "document_id": "DOC_TEST",
+            "title": "테스트 공식 문서",
+            "url": "https://example.com/test",
+            "text": f"공식 검색 근거 {evidence_id}",
+            "chunk_id": f"CHK_{evidence_id}",
+        }
+        for evidence_id in evidence_ids
+    }
+
+
+def _cited_answer_generator(
+    question,
+    evidences,
+) -> CitedAnswer:
+    """LLM 호출 없이 정상적인 구조화 답변을 만듭니다."""
+
+    del question
+
+    evidence = evidences[0]
+
+    return CitedAnswer(
+        answer=evidence.quote,
+        claims=[
+            Claim(
+                text=evidence.quote,
+                citations=[
+                    Citation(
+                        evidence_id=evidence.evidence_id,
+                        quote=evidence.quote,
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def _support_checker(
+    claim,
+    contexts,
+) -> AnswerReview:
+    """테스트에서는 유효한 주장으로 판정합니다."""
+
+    assert claim
+    assert contexts
+
+    return AnswerReview(
+        supported=True,
+        reason="테스트 근거가 주장을 직접 뒷받침합니다.",
+    )
+
+
+def _build_app(**kwargs):
+    """Supervisor 공통 테스트 의존성을 주입합니다."""
+
+    return build_supervisor(
+        evidence_lookup=_evidence_lookup,
+        cited_answer_generator=_cited_answer_generator,
+        citation_support_checker=_support_checker,
+        **kwargs,
+    )
 
 
 def _graph_result():
@@ -25,7 +102,7 @@ def test_supervisor_routes_and_calls_graph_worker():
         calls.append(("vector", question, kwargs))
         return []
 
-    app = build_supervisor(graph_search_fn=graph_search, vector_search_fn=vector_search)
+    app = _build_app(graph_search_fn=graph_search, vector_search_fn=vector_search)
     state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
 
     assert state["route"] == "GRAPH"
@@ -43,13 +120,27 @@ def test_supervisor_retries_with_hybrid_when_evidence_is_missing():
 
     def vector_search(question, **kwargs):
         routes.append("vector")
-        return [SearchResult(source="vector", text="공식 문서", chunk_ids=["CHK_1"])]
+        return [
+            SearchResult(
+                source="vector",
+                text="공식 문서",
+                evidence_ids=["EVD_1"],
+                chunk_ids=["CHK_1"],
+            )
+        ]
 
     def hybrid_search_fn(question, **kwargs):
         routes.append("hybrid")
-        return [SearchResult(source="vector", text="공식 문서", chunk_ids=["CHK_1"])]
+        return [
+            SearchResult(
+                source="vector",
+                text="공식 문서",
+                evidence_ids=["EVD_1"],
+                chunk_ids=["CHK_1"],
+            )
+        ]
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=graph_search,
         vector_search_fn=vector_search,
         hybrid_search_fn=hybrid_search_fn,
@@ -66,7 +157,7 @@ def test_supervisor_withholds_after_retry_limit():
     def empty_search(question, **kwargs):
         return [SearchResult(source="graph", text="근거 없음")]
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=empty_search,
         vector_search_fn=empty_search,
         hybrid_search_fn=empty_search,
@@ -82,7 +173,7 @@ def test_supervisor_rejects_out_of_scope_quesion_with_reject_status():
     def unexpected_search(question, **kwargs): 
         raise AssertionError("REJECT 질문은 검색을 실행하지 않아야 함")
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=unexpected_search,
         vector_search_fn=unexpected_search,
         hybrid_search_fn=unexpected_search,
@@ -101,7 +192,7 @@ def test_supervisor_withhold_is_not_confused_with_reject():
     def empty_search(question, **kwargs):
         return [SearchResult(source="graph", text="근거 없음")]
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=empty_search,
         vector_search_fn=empty_search,
         hybrid_search_fn=empty_search,
@@ -117,7 +208,7 @@ def test_supervisor_keeps_retrieved_results_when_evidence_is_insufficient():
     """검증에서 탈락해도 검색 원본은 남아야 Hit@K를 채점할 수 있습니다."""
     retrieved = SearchResult(source="graph", text="근거 없음")
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=lambda question, **kwargs: [retrieved],
         vector_search_fn=lambda question, **kwargs: [retrieved],
         hybrid_search_fn=lambda question, **kwargs: [retrieved],
@@ -133,10 +224,15 @@ def test_supervisor_keeps_retrieved_results_when_evidence_is_insufficient():
 
 def test_supervisor_keeps_filtered_out_results_for_scoring_on_pass():
     """검증을 통과해도 탈락한 결과가 채점 대상에서 빠지면 안 됩니다."""
-    usable = SearchResult(source="vector", text="공식 문서", chunk_ids=["CHK_1"])
+    usable = SearchResult(
+        source="vector",
+        text="공식 문서",
+        evidence_ids=["EVD_1"],
+        chunk_ids=["CHK_1"],
+    )
     unusable = SearchResult(source="graph", text="근거 없음")
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=lambda question, **kwargs: [usable, unusable],
         vector_search_fn=lambda question, **kwargs: [],
     )
@@ -149,14 +245,19 @@ def test_supervisor_keeps_filtered_out_results_for_scoring_on_pass():
 
 def test_supervisor_accumulates_retrieved_results_across_retries():
     first = SearchResult(source="graph", text="근거 없음")
-    second = SearchResult(source="vector", text="공식 문서", chunk_ids=["CHK_1"])
+    second = SearchResult(
+        source="vector",
+        text="공식 문서",
+        evidence_ids=["EVD_2"],
+        chunk_ids=["CHK_2"],
+    )
     calls = {"n": 0}
 
     def graph_search(question, **kwargs):
         calls["n"] += 1
         return [first]
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=graph_search,
         vector_search_fn=lambda question, **kwargs: [],
         hybrid_search_fn=lambda question, **kwargs: [second],
@@ -171,7 +272,7 @@ def test_supervisor_does_not_duplicate_route_in_path_on_same_route_retry():
     """처음부터 HYBRID인 문항이 재시도해도 route_path에 중복이 쌓이면 안 됩니다."""
     insufficient = SearchResult(source="vector", text="근거 없음")
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=lambda question, **kwargs: [],
         vector_search_fn=lambda question, **kwargs: [],
         hybrid_search_fn=lambda question, **kwargs: [insufficient],
@@ -192,7 +293,7 @@ def test_supervisor_route_path_records_only_route_changes_across_retries():
     """재시도를 여러 번 해도 경로 전환은 한 번만 기록됩니다."""
     insufficient = SearchResult(source="graph", text="근거 없음")
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=lambda question, **kwargs: [insufficient],
         vector_search_fn=lambda question, **kwargs: [],
         hybrid_search_fn=lambda question, **kwargs: [insufficient],
@@ -207,7 +308,7 @@ def test_supervisor_does_not_duplicate_insufficient_evidence_warning():
     """재시도를 여러 번 해도 같은 경고가 반복되지 않습니다."""
     insufficient = SearchResult(source="graph", text="근거 없음")
 
-    app = build_supervisor(
+    app = _build_app(
         graph_search_fn=lambda question, **kwargs: [insufficient],
         vector_search_fn=lambda question, **kwargs: [insufficient],
         hybrid_search_fn=lambda question, **kwargs: [insufficient],

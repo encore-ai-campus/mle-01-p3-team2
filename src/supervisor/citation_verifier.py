@@ -28,6 +28,19 @@ class AnswerReview(BaseModel):
     supported: bool
     reason: str
 
+    conflict: bool = False
+    conflict_reason: str | None = None
+    conflicting_evidence_ids: list[str] = Field(default_factory=list)
+
+class CitationConflict(BaseModel):
+    """동일 주장에 연결된 근거 사이의 충돌입니다."""
+
+    claim_index: int
+    claim: str
+    evidence_ids: list[str]
+    reason: str
+    safety_critical: bool = False
+
 
 class CitationFailure(BaseModel):
     """인용 검증 실패 한 건입니다."""
@@ -43,6 +56,7 @@ class CitationVerificationResult(BaseModel):
     """답변 전체의 인용 검증 결과입니다."""
 
     status: CitationStatus
+    conflicts: list[CitationConflict] = Field(default_factory=list)
     failures: list[CitationFailure] = Field(default_factory=list)
     checked_claims: int = 0
     supported_claims: int = 0
@@ -81,6 +95,24 @@ def quote_exists(citation_quote: str, source_text: str) -> bool:
         and normalized_quote in normalized_source
     )
 
+_SAFETY_KEYWORDS = (
+    "농약",
+    "비료",
+    "희석",
+    "사용량",
+    "사용횟수",
+    "수확 전",
+    "안전사용",
+    "등록상태",
+)
+
+
+def _is_safety_critical_claim(claim: str) -> bool:
+    return any(
+        keyword in claim
+        for keyword in _SAFETY_KEYWORDS
+    )
+
 def verify_citations(
     answer: CitedAnswer,
     evidences: list[Evidence],
@@ -94,6 +126,7 @@ def verify_citations(
     }
 
     failures: list[CitationFailure] = []
+    conflicts: list[CitationConflict] = []
     supported_claims = 0
 
     if not answer.claims:
@@ -106,6 +139,7 @@ def verify_citations(
                     reason="검증할 주요 주장이 없습니다.",
                 )
             ],
+            conflicts=[],
             checked_claims=0,
             supported_claims=0,
         )
@@ -123,10 +157,14 @@ def verify_citations(
 
         valid_contexts: list[dict[str, str]] = []
 
-        for citation_index, citation in enumerate(claim.citations):
-            evidence = evidence_map.get(citation.evidence_id)
+        for citation_index, citation in enumerate(
+            claim.citations
+        ):
+            evidence = evidence_map.get(
+                citation.evidence_id
+            )
 
-            # 1단계: evidence_id 존재 검사
+            # 1단계: evidence_id 존재 확인
             if evidence is None:
                 failures.append(
                     CitationFailure(
@@ -142,8 +180,11 @@ def verify_citations(
                 )
                 continue
 
-            # 2단계: 인용 구절 존재 검사
-            if not quote_exists(citation.quote, evidence.quote):
+            # 2단계: 인용 구절이 원문에 존재하는지 확인
+            if not quote_exists(
+                citation.quote,
+                evidence.quote,
+            ):
                 failures.append(
                     CitationFailure(
                         code="QUOTE_NOT_FOUND",
@@ -166,12 +207,38 @@ def verify_citations(
                 }
             )
 
-        # 유효한 인용이 하나도 없으면 LLM 호출 생략
+        # ID 또는 인용 구절 검사에서 전부 실패했다면
+        # LLM support_checker를 호출하지 않음
         if not valid_contexts:
             continue
 
-        # 3단계: 유효한 인용 전체가 주장을 뒷받침하는지 판정
-        review = support_checker(claim.text, valid_contexts)
+        # 3단계: 유효한 인용들이 주장을 뒷받침하는지 확인
+        review = support_checker(
+            claim.text,
+            valid_contexts,
+        )
+
+        if review.conflict:
+            conflicts.append(
+                CitationConflict(
+                    claim_index=claim_index,
+                    claim=claim.text,
+                    evidence_ids=(
+                        review.conflicting_evidence_ids
+                    ),
+                    reason=(
+                        review.conflict_reason
+                        or review.reason
+                        or "근거 사이의 충돌이 확인되었습니다."
+                    ),
+                    safety_critical=(
+                        _is_safety_critical_claim(
+                            claim.text
+                        )
+                    ),
+                )
+            )
+            continue
 
         if review.supported:
             supported_claims += 1
@@ -184,16 +251,25 @@ def verify_citations(
                 )
             )
 
-    if not failures and supported_claims == len(answer.claims):
+    # 중요: 이 부분은 for claim 반복문 바깥에 있어야 함
+    if (
+        not failures
+        and not conflicts
+        and supported_claims == len(answer.claims)
+    ):
         status: CitationStatus = "PASS"
+
     elif supported_claims > 0:
         status = "PARTIAL"
+
     else:
         status = "FAIL"
 
+    # 중요: 최종 return도 for claim 반복문 바깥
     return CitationVerificationResult(
         status=status,
         failures=failures,
+        conflicts=conflicts,
         checked_claims=len(answer.claims),
         supported_claims=supported_claims,
     )
@@ -222,14 +298,19 @@ class LLMSupportChecker:
         )
 
         prompt = (
-            "다음 주장이 제시된 검색 근거만으로 "
-            "직접 뒷받침되는지 판정하세요.\n"
+            "다음 주장이 제시된 검색 근거만으로 직접 뒷받침되는지 "
+            "판정하세요.\n"
             "외부 지식을 사용하지 마세요.\n"
-            "여러 인용이 있을 경우 함께 결합해서 판단하세요.\n"
-            "근거가 주제만 비슷하고 주장 자체를 뒷받침하지 않으면 "
-            "supported=false입니다.\n"
-            "근거에 없는 숫자, 사용 조건, 대상 작물을 추가한 주장도 "
-            "supported=false입니다.\n\n"
+            "여러 인용이 있을 경우 함께 결합해서 판단하세요.\n\n"
+
+            "충돌 판정 규칙:\n"
+            "1. 같은 대상과 조건에 대해 수치, 날짜, 사용량, 희석배수, "
+            "사용횟수 또는 등록상태가 다르면 conflict=true입니다.\n"
+            "2. 서로 다른 작물·제품·시기·조건의 값은 충돌이 아닙니다.\n"
+            "3. 충돌한 경우 conflicting_evidence_ids에 양쪽 ID를 넣으세요.\n"
+            "4. 충돌 여부가 불분명하면 conflict=false로 두고 "
+            "supported 판단을 수행하세요.\n\n"
+
             f"주장:\n{claim}\n\n"
             f"검색 근거:\n{evidence_block}"
         )
