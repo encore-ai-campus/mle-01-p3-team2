@@ -13,6 +13,7 @@ from src.retrievers.search_result import SearchResult
 
 from .answer_agent import AnswerAgent
 from .state import GraphState
+from .citation_verifier import SupportChecker, verify_citations
 
 
 GraphSearch = Callable[..., list[SearchResult]]
@@ -48,6 +49,7 @@ def build_supervisor(
     answer_generator: AnswerGenerator | None = None,
     max_retries: int = 1,
     result_limit: int = 10,
+    citation_support_checker: SupportChecker | None = None,
 ):
     """검색 Worker와 검증 흐름을 연결한 실행 가능한 LangGraph를 만듭니다.
 
@@ -155,6 +157,60 @@ def build_supervisor(
             "route_path": path if path and path[-1] == "HYBRID" else [*path, 'HYBRID'],
             "route_reason": "기존 검색 결과의 근거가 부족해 하이브리드 검색으로 재시도합니다.",
             "retry_count": state.get("retry_count", 0) + 1,
+        }
+
+    def verify_citations_node(
+    state: GraphState,
+    ) -> dict[str, Any]:
+        cited_answer = state.get("cited_answer")
+        evidences = state.get("evidences", [])
+
+        if cited_answer is None:
+            return {
+                "citation_status": "FAIL",
+                "citation_failures": [
+                    {
+                        "code": "NO_CLAIMS",
+                        "claim_index": -1,
+                        "citation_index": None,
+                        "evidence_id": None,
+                        "reason": "구조화 답변이 생성되지 않았습니다.",
+                    }
+                ],
+                "checked_claims": 0,
+                "supported_claims": 0,
+            }
+
+        if citation_support_checker is None:
+            return {
+                "citation_status": "FAIL",
+                "citation_failures": [
+                    {
+                        "code": "NOT_SUPPORTED",
+                        "claim_index": -1,
+                        "citation_index": None,
+                        "evidence_id": None,
+                        "reason": "주장 지원 여부 판정기가 연결되지 않았습니다.",
+                    }
+                ],
+                "checked_claims": len(cited_answer.claims),
+                "supported_claims": 0,
+            }
+
+        result = verify_citations(
+            answer=cited_answer,
+            evidences=evidences,
+            support_checker=citation_support_checker,
+        )
+
+        return {
+            "citation_status": result.status,
+            "citation_failures": [
+                failure.model_dump()
+                for failure in result.failures
+            ],
+            "checked_claims": result.checked_claims,
+            "supported_claims": result.supported_claims,
         }
 
     def after_route(state: GraphState) -> str:
