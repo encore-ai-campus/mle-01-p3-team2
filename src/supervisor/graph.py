@@ -63,6 +63,9 @@ def build_supervisor(
         decision = selected_router.route_query(state.get("question", ""))
         return {
             "route": decision.route,
+            # 최초 판단은 fallback이 덮어쓰지 않도록 따로 보존합니다.
+            "initial_route": decision.route,
+            "route_path": [decision.route],
             "route_reason": decision.reason,
             "crop": decision.crop,
             "max_hops": decision.max_hops,
@@ -116,8 +119,11 @@ def build_supervisor(
         return {"answer": answer, "final_answer": answer, "final_status": "ANSWERED"}
 
     def retry_node(state: GraphState) -> dict[str, Any]:
+        # route만 HYBRID로 바꾸고, initial_route는 건드리지 않습니다.
+        # route_path에는 이동 이력을 덧붙여 어디서 넘어왔는지 남깁니다.
         return {
             "route": "HYBRID",
+            "route_path": [*state.get("route_path", []), "HYBRID"],
             "route_reason": "기존 검색 결과의 근거가 부족해 하이브리드 검색으로 재시도합니다.",
             "retry_count": state.get("retry_count", 0) + 1,
         }

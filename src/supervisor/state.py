@@ -11,7 +11,12 @@ class GraphState(TypedDict, total=False):
     """검색·검증·답변 노드 사이에서 공유하는 상태입니다."""
 
     question: str
+    # 현재 검색에 사용하는 경로입니다. fallback이 일어나면 바뀝니다.
     route: str
+    # Router가 처음 판단한 경로입니다. fallback이 일어나도 바뀌지 않습니다.
+    initial_route: str
+    # 경로 이동 이력입니다. 예: ["GRAPH", "HYBRID"]
+    route_path: list[str]
     route_reason: str
     crop: str | None
     max_hops: int
