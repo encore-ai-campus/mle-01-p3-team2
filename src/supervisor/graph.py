@@ -52,7 +52,6 @@ def _append_warning(
 
     return [*existing, message]
 
-
 def _has_usable_evidence(
     result: SearchResult,
 ) -> bool:
@@ -62,7 +61,29 @@ def _has_usable_evidence(
         return False
 
     # build_evidence()는 evidence_ids를 기준으로 원문을 조회합니다.
-    return bool(result.evidence_ids)
+    if not result.evidence_ids:
+        return False
+
+    if result.source == "graph":
+        edges = result.path_edges or []
+
+        if (
+            result.metadata.get("has_complete_evidence") is not True
+            or not edges
+        ):
+            return False
+
+        if not all(
+            edge.get("original_chunks")
+            and all(
+                chunk.get("text", "").strip()
+                for chunk in edge["original_chunks"]
+            )
+            for edge in edges
+        ):
+            return False
+
+    return True
 
 
 def _failed_claim_texts(
@@ -94,7 +115,7 @@ def _build_retry_query(
 ) -> str:
     """원래 질문에 검증 실패 주장을 추가합니다."""
 
-    # search_query를 다시 사용하면 재시도 문구가 중복될 수 있으므로
+    # search_query를 재사용하면 재시도 문구가 중복될 수 있으므로
     # 항상 원래 사용자 질문에서 시작합니다.
     question = state.get("question", "")
     failed_claims = _failed_claim_texts(state)
@@ -154,7 +175,7 @@ def _build_withhold_reason(
     if not parts:
         return "충분한 공식 근거를 확인하지 못했습니다."
 
-    # 중복 사유 제거, 기존 순서 유지
+    # 중복 사유를 제거하면서 기존 순서는 유지합니다.
     return "; ".join(dict.fromkeys(parts))
 
 
@@ -284,13 +305,13 @@ def build_supervisor(
         return {
             "results": results,
 
-            # 평가용 검색 원본은 재시도 후에도 누적
+            # 평가용 검색 원본은 재시도 후에도 누적합니다.
             "retrieved_results": [
                 *state.get("retrieved_results", []),
                 *results,
             ],
 
-            # 기존 필드명과의 호환을 위해 attemps 유지
+            # 기존 필드명과의 호환을 위해 attemps를 유지합니다.
             "attemps": attempts,
         }
 
