@@ -1,6 +1,7 @@
 from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
 from src.supervisor.graph import build_supervisor
+from src.supervisor.graph import INSUFFICIENT_EVIDENCE_WARNING, build_supervisor
 
 
 def _graph_result():
@@ -201,3 +202,18 @@ def test_supervisor_route_path_records_only_route_changes_across_retries():
 
     assert state["route_path"] == ["GRAPH", "HYBRID"]
     assert state["retry_count"] == 2
+
+def test_supervisor_does_not_duplicate_insufficient_evidence_warning():
+    """재시도를 여러 번 해도 같은 경고가 반복되지 않습니다."""
+    insufficient = SearchResult(source="graph", text="근거 없음")
+
+    app = build_supervisor(
+        graph_search_fn=lambda question, **kwargs: [insufficient],
+        vector_search_fn=lambda question, **kwargs: [insufficient],
+        hybrid_search_fn=lambda question, **kwargs: [insufficient],
+        max_retries=2,
+    )
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["retry_count"] == 2
+    assert state["warnings"].count(INSUFFICIENT_EVIDENCE_WARNING) == 1

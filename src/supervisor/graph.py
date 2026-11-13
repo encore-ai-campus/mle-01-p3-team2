@@ -25,6 +25,12 @@ def _default_answer(question: str, results: list[SearchResult]) -> str:
     del question
     return "\n".join(result.text for result in results)
 
+INSUFFICIENT_EVIDENCE_WARNING = "답변에 사용할 공식 근거가 부족합니다."
+
+
+def _append_warning(existing: list[str], message: str) -> list[str]:
+    """같은 경고를 재시도마다 반복해서 쌓지 않습니다."""
+    return existing if message in existing else [*existing, message]
 
 def _has_usable_evidence(result: SearchResult) -> bool:
     """검색 결과가 답변 근거로 사용할 수 있는지 확인합니다."""
@@ -113,7 +119,7 @@ def build_supervisor(
             "results": [],
             "evidence_status": "INSUFFICIENT",
             'rejected_results': [r for r in results if not _has_usable_evidence(r)],
-            "warnings": [*state.get("warnings", []), "답변에 사용할 공식 근거가 부족합니다."],
+            "warnings": _append_warning(state.get("warnings", []), INSUFFICIENT_EVIDENCE_WARNING),
         }
 
     def answer_node(state: GraphState) -> dict[str, Any]:
