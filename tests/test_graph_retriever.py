@@ -150,8 +150,13 @@ class FakeSession:
     def __exit__(self, *_):
         return False
 
-    def run(self, query, params):
+    def run(self, query, params=None):
+        params = params or {}
         self.calls.append((query, params))
+        if query.startswith("MATCH (n:Crop)"):
+            crop = params.get("crop")
+            return FakeResult([{"entity_id": "CRP_FAKE", "name": crop, "attributes": "{}"}]
+                              if crop else [])
         if query.startswith("MATCH (chunk:Chunk)"):
             return FakeResult(self.chunk_rows)
         self.query = query
@@ -184,7 +189,18 @@ def test_search_paths_uses_typed_directional_query():
     assert "(start:`Crop`)" in driver.session_instance.query
     assert ":`HAS_VARIETY`|`SUITABLE_FOR_REGION`" in driver.session_instance.query
     assert "->(target)" in driver.session_instance.query
-    assert driver.session_instance.params == {"limit": 10, "start_name": "마늘"}
+    assert driver.session_instance.params["candidate_limit"] == 10
+    assert driver.session_instance.params["start_name"] == "마늘"
+
+
+def test_search_paths_supports_three_hops_and_candidate_pool():
+    driver = FakeDriver()
+    GraphRetriever(driver).search_paths(
+        start_name="마늘", min_hops=2, max_hops=3,
+        question="마늘 품종과 지역", candidate_limit=30, limit=10,
+    )
+    assert "*2..3" in driver.session_instance.query
+    assert driver.session_instance.params["candidate_limit"] == 90
 
 
 def test_graph_search_returns_shared_search_result_from_path():
@@ -227,7 +243,7 @@ def test_graph_search_returns_shared_search_result_from_path():
     assert results[0].path_edges[0]["original_chunks"][0]["text"] == "남부 재배 원문"
     assert results[0].hop_count == 1
     assert results[0].metadata["hop_count"] == 1
-    assert driver.session_instance.params["limit"] == 5
+    assert driver.session_instance.params["candidate_limit"] == 90
     assert driver.session_instance.params["start_name"] == "마늘"
 
 
@@ -394,12 +410,13 @@ def test_explicit_variety_region_question_prioritizes_named_two_hop_path():
         crop="마늘", max_hops=2, limit=10,
     )
 
-    query, params = driver.session_instance.calls[0]
+    query, params = next((q, p) for q, p in driver.session_instance.calls if "MATCH path =" in q)
     assert "*2..2" in query
     assert ":`HAS_VARIETY`|`SUITABLE_FOR_REGION`" in query
-    assert "$question CONTAINS node.name" in query
-    assert params["question"].startswith("마늘 의성종")
-    assert len(driver.session_instance.calls) > 1  # 이름 일치 경로가 없으면 일반 검색
+    assert "node_score" in query
+    assert "$question CONTAINS node.name" not in query
+    assert params["terms"]
+    assert len(driver.session_instance.calls) >= 2  # crop anchor lookup + path query
 
 
 def test_graph_search_keeps_a_two_hop_result_when_named_path_exists():
@@ -443,7 +460,7 @@ def test_variety_group_region_question_uses_two_hop_search():
         limit=10,
     )
 
-    query, params = driver.session_instance.calls[0]
+    query, params = next((q, p) for q, p in driver.session_instance.calls if "MATCH path =" in q)
     assert "*2..2" in query
     assert ":`HAS_VARIETY`|`SUITABLE_FOR_REGION`" in query
-    assert params["question"].startswith("중만생종 양파")
+    assert "양파" in params["terms"]
