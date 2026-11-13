@@ -226,3 +226,7 @@ data/portable/
 # Local runtime and Hugging Face model cache
 .venv/
 .hf-cache/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
