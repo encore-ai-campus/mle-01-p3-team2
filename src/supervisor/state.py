@@ -1,12 +1,9 @@
 """Supervisor가 공유하는 LangGraph 상태 정의입니다."""
 
 from __future__ import annotations
-
-from typing import TypedDict
-
 from src.retrievers.search_result import SearchResult
-
 from typing import Any, TypedDict
+from src.retrievers.answer import CitedAnswer, Evidence
 
 
 class GraphState(TypedDict, total=False):
@@ -40,3 +37,23 @@ class GraphState(TypedDict, total=False):
     final_answer: str
     # 시도별 기록. 예: [{"route": "GRAPH", "max_hops": 2, "found": 0}, ...]
     attemps: list[dict[str, Any]]
+    # build_evidence 결과
+    evidences: list[Evidence]
+    dropped_evidences: list[dict[str, Any]]
+    # 구조화된 답변 생성 결과
+    cited_answer: CitedAnswer | None
+    # PASS | PARITAL | FAIL
+    citation_status: str
+    # CitationFailure.model_dump() 목록
+    citation_failures: list[dict[str, Any]]
+    checked_claims: int
+    supported_claims: int
+    citation_status: str
+    citation_failures: list[dict[str, Any]]
+    citation_conflicts: list[dict[str, Any]]
+    # 재검색에 실제로 사용할 확장 쿼리
+    search_query: str
+    # 인용 검증 실패로 재검색했는지 여부
+    retry_reason: str
+    # 최종 보류 사유
+    withhold_reason: str
