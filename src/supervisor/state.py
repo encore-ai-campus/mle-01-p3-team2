@@ -6,6 +6,8 @@ from typing import TypedDict
 
 from src.retrievers.search_result import SearchResult
 
+from typing import Any, TypedDict
+
 
 class GraphState(TypedDict, total=False):
     """검색·검증·답변 노드 사이에서 공유하는 상태입니다."""
@@ -20,11 +22,21 @@ class GraphState(TypedDict, total=False):
     route_reason: str
     crop: str | None
     max_hops: int
+    # 답변 근거로 사용할 결과. verify에서 걸러진 뒤의 것
     results: list[SearchResult]
+    # 검증 전 검색 원본. verify가 덮어쓰지 않음
+    # Hit@K, multi-hop 채점은 이 값을 봐야 함. 재시도 시 누적됨
+    retrieved_results: list[SearchResult]
+    # verify에서 탈락한 결과. Hit@K는 맞지만 보류된 문항을 진단할 떄 사용
+    rejected_results: list[SearchResult]
     warnings: list[str]
+    # PASS | INSUFFICIENT | NOT_APPLICABLE (범위 밖이라 검증을 건너뜀)
     evidence_status: str
     retry_count: int
     max_retries: int
     answer: str
+    # ANSWERED | WITHHELD | REJECTED
     final_status: str
     final_answer: str
+    # 시도별 기록. 예: [{"route": "GRAPH", "max_hops": 2, "found": 0}, ...]
+    attemps: list[dict[str, Any]]

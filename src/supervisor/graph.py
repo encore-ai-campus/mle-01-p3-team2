@@ -25,6 +25,12 @@ def _default_answer(question: str, results: list[SearchResult]) -> str:
     del question
     return "\n".join(result.text for result in results)
 
+INSUFFICIENT_EVIDENCE_WARNING = "답변에 사용할 공식 근거가 부족합니다."
+
+
+def _append_warning(existing: list[str], message: str) -> list[str]:
+    """같은 경고를 재시도마다 반복해서 쌓지 않습니다."""
+    return existing if message in existing else [*existing, message]
 
 def _has_usable_evidence(result: SearchResult) -> bool:
     """검색 결과가 답변 근거로 사용할 수 있는지 확인합니다."""
@@ -72,6 +78,8 @@ def build_supervisor(
             "warnings": list(decision.warnings),
             "retry_count": state.get("retry_count", 0),
             "max_retries": state.get("max_retries", max_retries),
+            'route_reason': decision.reason,
+            'initial_route_reason': decision.reason,
         }
 
     def retrieve_node(state: GraphState) -> dict[str, Any]:
@@ -96,7 +104,11 @@ def build_supervisor(
             )
         else:
             results = []
-        return {"results": results}
+        return {"results": results,
+                # 재시도가 일어나도 이전 시도의 검색 결과르 잃지 않도록 누적
+                "retrieved_results": [*state.get('retrieved_results', []), *results],
+                'attemps': [*state.get('attemps', []), {'route': route, 'max_hops': max_hops, 'limit': result_limit, 'found': len(results)}],
+                }
 
     def verify_node(state: GraphState) -> dict[str, Any]:
         results = state.get("results", [])
@@ -106,7 +118,8 @@ def build_supervisor(
         return {
             "results": [],
             "evidence_status": "INSUFFICIENT",
-            "warnings": [*state.get("warnings", []), "답변에 사용할 공식 근거가 부족합니다."],
+            'rejected_results': [r for r in results if not _has_usable_evidence(r)],
+            "warnings": _append_warning(state.get("warnings", []), INSUFFICIENT_EVIDENCE_WARNING),
         }
 
     def answer_node(state: GraphState) -> dict[str, Any]:
@@ -118,18 +131,34 @@ def build_supervisor(
         answer = generate_answer(state.get("question", ""), state.get("results", []))
         return {"answer": answer, "final_answer": answer, "final_status": "ANSWERED"}
 
+    def reject_node(state: GraphState) -> dict[str, Any]:
+        """범위 밖 질문을 검색 없이 거절"""
+        reason = state.get("route_reason") or "질문이 이 서비스의 범위를 벗어났습니다."
+        return {
+            "results": [],
+            # 검증을 수행하지 않았다는 의미
+            # INSUFFICIENT (검색은 했지만 근거가 부족함)와 구별해야 함
+            "evidence_status": "NOT_APPLICABLE",
+            "final_status": "REJECTED",
+            "final_answer": (
+                f"{reason} 농업 재배·병해충·농약·비료 관련 질문을 입력해 주세요."
+            )
+        }
+
     def retry_node(state: GraphState) -> dict[str, Any]:
         # route만 HYBRID로 바꾸고, initial_route는 건드리지 않습니다.
-        # route_path에는 이동 이력을 덧붙여 어디서 넘어왔는지 남깁니다.
+        # route_path는 '경로가 바뀐 이력', 같은 경로로 재시도할 때는
+        # 덧붙이지 않음. 재시도 횟수는 retry_count()가 따로 셈
+        path = state.get('route_path', [])
         return {
             "route": "HYBRID",
-            "route_path": [*state.get("route_path", []), "HYBRID"],
+            "route_path": path if path and path[-1] == "HYBRID" else [*path, 'HYBRID'],
             "route_reason": "기존 검색 결과의 근거가 부족해 하이브리드 검색으로 재시도합니다.",
             "retry_count": state.get("retry_count", 0) + 1,
         }
 
     def after_route(state: GraphState) -> str:
-        return "retrieve" if state.get("route") != "REJECT" else "answer"
+        return "retrieve" if state.get("route") != "REJECT" else "reject"
 
     def after_verify(state: GraphState) -> str:
         if state.get("evidence_status") == "PASS":
@@ -144,10 +173,12 @@ def build_supervisor(
     workflow.add_node("verify", verify_node)
     workflow.add_node("retry", retry_node)
     workflow.add_node("answer", answer_node)
+    workflow.add_node("reject", reject_node) # reject 노드 추가
     workflow.add_edge(START, "route")
-    workflow.add_conditional_edges("route", after_route, {"retrieve": "retrieve", "answer": "answer"})
+    workflow.add_conditional_edges("route", after_route, {"retrieve": "retrieve", "reject": "reject"})
     workflow.add_edge("retrieve", "verify")
     workflow.add_conditional_edges("verify", after_verify, {"retry": "retry", "answer": "answer"})
     workflow.add_edge("retry", "retrieve")
     workflow.add_edge("answer", END)
+    workflow.add_edge("reject", END)
     return workflow.compile()
