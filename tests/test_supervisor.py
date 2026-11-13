@@ -76,3 +76,38 @@ def test_supervisor_withholds_after_retry_limit():
     assert state["final_status"] == "WITHHELD"
     assert state["evidence_status"] == "INSUFFICIENT"
     assert state["retry_count"] == 1
+
+def test_supervisor_rejects_out_of_scope_quesion_with_reject_status():
+    def unexpected_search(question, **kwargs): 
+        raise AssertionError("REJECT 질문은 검색을 실행하지 않아야 함")
+
+    app = build_supervisor(
+        graph_search_fn=unexpected_search,
+        vector_search_fn=unexpected_search,
+        hybrid_search_fn=unexpected_search,
+    )
+    state = app.invoke({'question': '서울에서 데이터하기 좋은 맛집을 추천해주세요.'})
+
+    assert state['final_status'] == 'REJECTED'
+    assert state['evidence_status'] == 'NOT_APPLICABLE'
+    assert not state.get('results')
+    # 검색을 했다는 오해를 주는 문구가 섞이지 않아야 함
+    assert '근거' not in state['final_answer']
+
+def test_supervisor_withhold_is_not_confused_with_reject():
+    """범위 안인데 근거가 없는 질문은 REJECTED가 아니라 WITHHELD입니다."""
+
+    def empty_search(question, **kwargs):
+        return [SearchResult(source="graph", text="근거 없음")]
+
+    app = build_supervisor(
+        graph_search_fn=empty_search,
+        vector_search_fn=empty_search,
+        hybrid_search_fn=empty_search,
+        max_retries=1,
+    )
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["final_status"] == "WITHHELD"
+    assert state["evidence_status"] == "INSUFFICIENT"
+    assert state["route"] != "REJECT"

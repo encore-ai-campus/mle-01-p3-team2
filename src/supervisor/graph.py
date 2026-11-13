@@ -96,7 +96,10 @@ def build_supervisor(
             )
         else:
             results = []
-        return {"results": results}
+        return {"results": results,
+                # 재시도가 일어나도 이전 시도의 검색 결과르 잃지 않도록 누적
+                "retrieved_results": [*state.get('retrieved_results', []), *results]
+                }
 
     def verify_node(state: GraphState) -> dict[str, Any]:
         results = state.get("results", [])
@@ -106,6 +109,7 @@ def build_supervisor(
         return {
             "results": [],
             "evidence_status": "INSUFFICIENT",
+            'rejected_results': [r for r in results if not _has_usable_evidence(r)],
             "warnings": [*state.get("warnings", []), "답변에 사용할 공식 근거가 부족합니다."],
         }
 
@@ -118,6 +122,20 @@ def build_supervisor(
         answer = generate_answer(state.get("question", ""), state.get("results", []))
         return {"answer": answer, "final_answer": answer, "final_status": "ANSWERED"}
 
+    def reject_node(state: GraphState) -> dict[str, Any]:
+        """범위 밖 질문을 검색 없이 거절"""
+        reason = state.get("route_reason") or "질문이 이 서비스의 범위를 벗어났습니다."
+        return {
+            "results": [],
+            # 검증을 수행하지 않았다는 의미
+            # INSUFFICIENT (검색은 했지만 근거가 부족함)와 구별해야 함
+            "evidence_status": "NOT_APPLICABLE",
+            "final_status": "REJECTED",
+            "final_answer": (
+                f"{reason} 농업 재배·병해충·농약·비료 관련 질문을 입력해 주세요."
+            )
+        }
+
     def retry_node(state: GraphState) -> dict[str, Any]:
         # route만 HYBRID로 바꾸고, initial_route는 건드리지 않습니다.
         # route_path에는 이동 이력을 덧붙여 어디서 넘어왔는지 남깁니다.
@@ -129,7 +147,7 @@ def build_supervisor(
         }
 
     def after_route(state: GraphState) -> str:
-        return "retrieve" if state.get("route") != "REJECT" else "answer"
+        return "retrieve" if state.get("route") != "REJECT" else "reject"
 
     def after_verify(state: GraphState) -> str:
         if state.get("evidence_status") == "PASS":
@@ -144,10 +162,12 @@ def build_supervisor(
     workflow.add_node("verify", verify_node)
     workflow.add_node("retry", retry_node)
     workflow.add_node("answer", answer_node)
+    workflow.add_node("reject", reject_node) # reject 노드 추가
     workflow.add_edge(START, "route")
-    workflow.add_conditional_edges("route", after_route, {"retrieve": "retrieve", "answer": "answer"})
+    workflow.add_conditional_edges("route", after_route, {"retrieve": "retrieve", "reject": "reject"})
     workflow.add_edge("retrieve", "verify")
     workflow.add_conditional_edges("verify", after_verify, {"retry": "retry", "answer": "answer"})
     workflow.add_edge("retry", "retrieve")
     workflow.add_edge("answer", END)
+    workflow.add_edge("reject", END)
     return workflow.compile()

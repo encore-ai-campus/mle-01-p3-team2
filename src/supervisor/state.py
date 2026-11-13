@@ -20,11 +20,17 @@ class GraphState(TypedDict, total=False):
     route_reason: str
     crop: str | None
     max_hops: int
+    # 답변 근거로 사용할 결과. verify에서 걸러진 뒤의 것
     results: list[SearchResult]
+    # 검증 전 검색 원본. verify가 덮어쓰지 않음
+    # Hit@K, multi-hop 채점은 이 값을 봐야 함. 재시도 시 누적됨
+    retrieved_results: list[SearchResult]
     warnings: list[str]
+    # PASS | INSUFFICIENT | NOT_APPLICABLE (범위 밖이라 검증을 건너뜀)
     evidence_status: str
     retry_count: int
     max_retries: int
     answer: str
+    # ANSWERED | WITHHELD | REJECTED
     final_status: str
     final_answer: str
