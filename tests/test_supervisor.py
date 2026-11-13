@@ -11,6 +11,11 @@ def _graph_result():
         evidence_ids=["EVD_1"],
         path=["마늘", "대서마늘", "남부 지역"],
         relation_types=["HAS_VARIETY", "SUITABLE_FOR_REGION"],
+        path_edges=[
+            {"hop": 1, "relation_type": "HAS_VARIETY", "from_entity_id": "CROP_1", "to_entity_id": "VAR_1", "relation_id": "REL_1", "original_chunks": [{"chunk_id": "CHK_1", "evidence_id": "EVD_1", "source_id": "SRC_1", "text": "마늘 품종은 대서마늘이다."}]},
+            {"hop": 2, "relation_type": "SUITABLE_FOR_REGION", "from_entity_id": "VAR_1", "to_entity_id": "REG_1", "relation_id": "REL_2", "original_chunks": [{"chunk_id": "CHK_2", "evidence_id": "EVD_2", "source_id": "SRC_2", "text": "대서마늘은 남부 지역에 적합하다."}]},
+        ],
+        metadata={"has_complete_evidence": True},
     )
 
 
@@ -217,3 +222,30 @@ def test_supervisor_does_not_duplicate_insufficient_evidence_warning():
 
     assert state["retry_count"] == 2
     assert state["warnings"].count(INSUFFICIENT_EVIDENCE_WARNING) == 1
+
+
+def test_supervisor_withholds_graph_path_with_ids_but_no_original_text():
+    missing_original = SearchResult(
+        source="graph",
+        text="마늘 → 품종 → 지역",
+        evidence_ids=["EVD_1"],
+        path_edges=[
+            {"hop": 1, "original_chunks": []},
+            {"hop": 2, "original_chunks": []},
+        ],
+        metadata={"has_complete_evidence": False},
+    )
+    app = build_supervisor(
+        graph_search_fn=lambda question, **kwargs: [missing_original],
+        vector_search_fn=lambda question, **kwargs: [],
+        hybrid_search_fn=lambda question, **kwargs: [missing_original],
+        answer_generator=lambda question, results: "답변하면 안 됨",
+        max_retries=1,
+    )
+
+    state = app.invoke({"question": "마늘 품종별 적합 지역은 어디인가?"})
+
+    assert state["retry_count"] == 1
+    assert state["evidence_status"] == "INSUFFICIENT"
+    assert state["final_status"] == "WITHHELD"
+    assert state["results"] == []
