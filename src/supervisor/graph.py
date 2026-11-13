@@ -36,6 +36,16 @@ def _has_usable_evidence(result: SearchResult) -> bool:
     """검색 결과가 답변 근거로 사용할 수 있는지 확인합니다."""
     if result.metadata.get("retrieval_eligible") is False:
         return False
+    if result.source == "graph":
+        edges = result.path_edges or []
+        if result.metadata.get("has_complete_evidence") is not True or not edges:
+            return False
+        if not all(
+            edge.get("original_chunks")
+            and all(chunk.get("text", "").strip() for chunk in edge["original_chunks"])
+            for edge in edges
+        ):
+            return False
     return bool(result.evidence_ids or result.source_ids or result.chunk_ids)
 
 
@@ -105,7 +115,7 @@ def build_supervisor(
         else:
             results = []
         return {"results": results,
-                # 재시도가 일어나도 이전 시도의 검색 결과르 잃지 않도록 누적
+                # 재시도가 일어나도 이전 시도의 검색 결과를 잃지 않도록 누적
                 "retrieved_results": [*state.get('retrieved_results', []), *results],
                 'attemps': [*state.get('attemps', []), {'route': route, 'max_hops': max_hops, 'limit': result_limit, 'found': len(results)}],
                 }
