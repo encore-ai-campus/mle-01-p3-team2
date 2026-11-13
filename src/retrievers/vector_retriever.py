@@ -63,6 +63,9 @@ class VectorIndex:
             "RETURN node.chunk_id AS chunk_id, "
             "node.source_id AS source_id, "
             "node.evidence_id AS evidence_id, "
+            "node.document_id AS document_id, "
+            "node.title AS title, "
+            "node.source_url AS url, "
             "node.raw_text AS text, "
             "node.embedding_model AS embedding_model, "
             "node.embedding_dimension AS embedding_dimension, "
@@ -153,6 +156,9 @@ class VectorIndex:
                         "embedding_model": record.get("embedding_model"),
                         "embedding_dimension": record.get("embedding_dimension"),
                         "source_official": record.get("source_official"),
+                        'document_id': record.get('document_id'),
+                        'title': record.get('title'),
+                        'url': record.get('url'),
                     },
                 )
             )

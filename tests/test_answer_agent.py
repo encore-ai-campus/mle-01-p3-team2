@@ -1,7 +1,22 @@
-from src.retrievers.hybrid_retriever import build_context
 from src.retrievers.search_result import SearchResult
+from src.retrievers.answer import (Citation, CitedAnswer, Claim, Evidence, render_cited_answer)
 from src.supervisor.answer_agent import ANSWER_MODEL, AnswerAgent
 
+def _evidence() -> Evidence:
+    return Evidence(
+        evidence_id="EVD_1",
+        document_id="DOC_1",
+        title="배추 농약 등록 정보",
+        url="https://example.com/pesticide",
+        quote=(
+            "작물=배추; 병해충=무름병; "
+            "사용적기=정식전; 최대 사용횟수=1회"
+        ),
+        relation_ids=["REL_1"],
+        graph_path=["배추", "무름병", "등록약제"],
+        source="graph",
+        chunk_ids=["CHK_1"],
+    )
 
 def test_answer_agent_fallback_preserves_graph_and_source_evidence():
     result = SearchResult(
@@ -50,3 +65,104 @@ def test_answer_agent_uses_fixed_answer_model(monkeypatch):
     AnswerAgent.from_env()
 
     assert captured["model"] == ANSWER_MODEL
+
+def test_answer_agent_generates_structured_cited_answer():
+    expected = CitedAnswer(
+        answer="해당 약제는 배추 무름병에 정식 전에 사용합니다.",
+        claims=[
+            Claim(
+                text="해당 약제의 사용 적기는 정식 전이다.",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_1",
+                        quote="사용적기=정식전",
+                    )
+                ],
+            )
+        ],
+    )
+
+    class FakeStructuredModel:
+        def invoke(self, prompt):
+            assert "evidence_id: EVD_1" in prompt
+            assert "사용적기=정식전" in prompt
+            return expected
+
+    class FakeModel:
+        def with_structured_output(self, schema):
+            assert schema is CitedAnswer
+            return FakeStructuredModel()
+
+    result = AnswerAgent(FakeModel()).generate_cited(
+        "배추 무름병 약제는 언제 사용하나요?",
+        [_evidence()],
+    )
+
+    assert result == expected
+    assert result.claims[0].citations[0].evidence_id == "EVD_1"
+
+def test_answer_agent_returns_empty_claims_without_evidence():
+    class FailIfCalledModel:
+        def with_structured_output(self, schema):
+            raise AssertionError("근거가 없으면 LLM을 호출하면 안 됩니다.")
+
+    result = AnswerAgent(FailIfCalledModel()).generate_cited("질문", [])
+
+    assert result.claims == []
+    assert "근거가 없습니다" in result.answer
+
+def test_answer_agent_without_model_does_not_create_claims():
+    result = AnswerAgent().generate_cited("질문", [_evidence()])
+
+    assert result.claims == []
+    assert "답변을 보류" in result.answer
+
+def test_render_cited_answer_includes_title_url_and_quote():
+    answer = CitedAnswer(
+        answer="해당 약제는 정식 전에 사용합니다.",
+        claims=[Claim(
+                text="사용 적기는 정식 전이다.",
+                citations=[Citation(
+                        evidence_id="EVD_1",
+                        quote="사용적기=정식전",
+                    )
+                ],
+            )
+        ],
+    )
+
+    rendered = render_cited_answer(answer, [_evidence()])
+
+    assert "[1] 배추 농약 등록 정보" in rendered
+    assert "https://example.com/pesticide" in rendered
+    assert "작물=배추; 병해충=무름병" in rendered
+    assert "배추 → 무름병 → 등록약제" in rendered
+
+def test_render_cited_answer_deduplicates_same_evidence_id():
+    answer = CitedAnswer(
+        answer="답변",
+        claims=[
+            Claim(
+                text="주장 1",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_1",
+                        quote="사용적기=정식전",
+                    )
+                ],
+            ),
+            Claim(
+                text="주장 2",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_1",
+                        quote="최대 사용횟수=1회",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    rendered = render_cited_answer(answer, [_evidence()])
+
+    assert rendered.count("[1] 배추 농약 등록 정보") == 1
