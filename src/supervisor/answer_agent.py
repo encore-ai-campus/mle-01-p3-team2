@@ -12,6 +12,7 @@ from src.retrievers.answer import (
 )
 from src.retrievers.hybrid_retriever import build_context
 from src.retrievers.search_result import SearchResult
+from src.supervisor.citation_verifier import AnswerReview
 
 ANSWER_MODEL = "gpt-5.6-luna"
 
@@ -103,6 +104,41 @@ class AnswerAgent:
             return result
 
         return CitedAnswer.model_validate(result)
+
+    def review_support(
+        self,
+        claim: str,
+        contexts: list[dict[str, str]],
+    ) -> AnswerReview:
+        """주장이 인용 원문으로 직접 뒷받침되는지 판정합니다."""
+
+        if self.model is None:
+            return AnswerReview(
+                supported=False,
+                reason="주장 지원 여부 판정 모델을 사용할 수 없습니다.",
+            )
+
+        context_block = "\n\n".join(
+            (
+                f"evidence_id: {context['evidence_id']}\n"
+                f"인용문: {context['citation_quote']}\n"
+                f"원문: {context['source_text']}"
+            )
+            for context in contexts
+        )
+        prompt = (
+            "주장이 제공된 인용문과 원문으로 직접 뒷받침되는지 판정하세요.\n"
+            "근거에 없는 추론이 필요하면 supported=false로 판정하세요.\n"
+            "근거 사이에 충돌이 있으면 conflict=true로 표시하세요.\n\n"
+            f"주장: {claim}\n\n근거:\n{context_block}"
+        )
+        structured_model = self.model.with_structured_output(AnswerReview)
+        result = structured_model.invoke(prompt)
+
+        if isinstance(result, AnswerReview):
+            return result
+
+        return AnswerReview.model_validate(result)
 
     @staticmethod
     def _fallback_answer(context: str) -> str:

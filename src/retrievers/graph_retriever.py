@@ -396,6 +396,7 @@ class GraphRetriever:
         max_hops: int = 2,
         relation_types: Sequence[str] | None = None,
         limit: int = 20,
+        mentioned_in_question: str | None = None,
     ) -> list[GraphSearchResult]:
         """지정된 엔티티를 시작점으로 멀티홉 경로를 검색합니다."""
 
@@ -440,11 +441,15 @@ class GraphRetriever:
         # --------------------------------------------------
         # 2. Cypher 검색 쿼리
         # --------------------------------------------------
-        where_clause = (
-            "WHERE start.name = $start_name"
-            if start_name is not None
-            else ""
-        )
+        conditions = []
+        if start_name is not None:
+            conditions.append("start.name = $start_name")
+        if mentioned_in_question is not None:
+            conditions.append(
+                "any(node IN nodes(path)[1..] WHERE "
+                "node.name IS NOT NULL AND $question CONTAINS node.name)"
+            )
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
         query = f"""
         MATCH path = (start:`{start_label}`)-[{rel_pattern}*{min_hops}..{max_hops}]->(target)
@@ -454,10 +459,9 @@ class GraphRetriever:
         LIMIT $limit
         """
 
-        params = {
-            "start_name": start_name,
-            "limit": limit,
-        }
+        params = {"start_name": start_name, "limit": limit}
+        if mentioned_in_question is not None:
+            params["question"] = mentioned_in_question
 
         # --------------------------------------------------
         # 3. Neo4j 읽기 트랜잭션
@@ -506,13 +510,47 @@ class GraphRetriever:
                 "question must be a nonempty string"
             )
 
+        # 구체적인 다중 관계 질문은 긴 경로를 먼저 찾습니다. 짧은 경로가
+        # LIMIT을 전부 차지해 2-hop 근거가 사라지는 것을 막습니다.
+        variety_region = (
+            "지역" in question
+            and (
+                "품종" in question
+                or re.search(r"[가-힣A-Za-z0-9]+종", question) is not None
+            )
+        )
+        pesticide_target = (
+            ("방제" in question or "농약" in question or "약제" in question)
+            and ("병해" in question or "해충" in question or "노균병" in question)
+        )
+        explicit_multihop = "2홉" in question or "멀티홉" in question
+        if max_hops >= 2 and (explicit_multihop or variety_region or pesticide_target):
+            focused_types = relation_types
+            if focused_types is None and variety_region:
+                focused_types = ["HAS_VARIETY", "SUITABLE_FOR_REGION"]
+            elif focused_types is None and pesticide_target:
+                focused_types = ["HAS_REGISTERED_PESTICIDE_USE", "CONTROLS_TARGET"]
+            focused = self.search_paths(
+                start_label="Crop", start_name=crop,
+                min_hops=2, max_hops=max_hops,
+                relation_types=focused_types, limit=limit,
+                mentioned_in_question=question,
+            )
+            if focused:
+                return focused
+            # 이름이 일치하는 노드가 없어도 2-hop 경로를 먼저 확인합니다.
+            if focused_types:
+                fallback = self.search_paths(
+                    start_label="Crop", start_name=crop,
+                    min_hops=2, max_hops=max_hops,
+                    relation_types=focused_types, limit=limit,
+                )
+                if fallback:
+                    return fallback
+
         return self.search_paths(
-            start_label="Crop",
-            start_name=crop,
-            min_hops=1,
-            max_hops=max_hops,
-            relation_types=relation_types,
-            limit=limit,
+            start_label="Crop", start_name=crop, min_hops=1,
+            max_hops=max_hops, relation_types=relation_types, limit=limit,
         )
 
 

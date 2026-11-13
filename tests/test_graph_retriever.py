@@ -227,7 +227,8 @@ def test_graph_search_returns_shared_search_result_from_path():
     assert results[0].path_edges[0]["original_chunks"][0]["text"] == "남부 재배 원문"
     assert results[0].hop_count == 1
     assert results[0].metadata["hop_count"] == 1
-    assert driver.session_instance.params == {"limit": 5, "start_name": "마늘"}
+    assert driver.session_instance.params["limit"] == 5
+    assert driver.session_instance.params["start_name"] == "마늘"
 
 
 def test_graph_search_rejects_blank_question():
@@ -382,3 +383,67 @@ def test_two_hop_path_reports_partial_original_evidence():
     assert result.path_edges[0]["original_chunks"][0]["text"] == "품종 원문"
     assert result.path_edges[1]["original_chunks"] == []
     assert "Graph path has partial original evidence" in result.warnings
+
+
+def test_explicit_variety_region_question_prioritizes_named_two_hop_path():
+    driver = FakeDriver()
+    retriever = GraphRetriever(driver)
+
+    retriever.search(
+        "마늘 의성종 품종은 어떤 지역에 적합한가요? 2홉 경로를 알려주세요",
+        crop="마늘", max_hops=2, limit=10,
+    )
+
+    query, params = driver.session_instance.calls[0]
+    assert "*2..2" in query
+    assert ":`HAS_VARIETY`|`SUITABLE_FOR_REGION`" in query
+    assert "$question CONTAINS node.name" in query
+    assert params["question"].startswith("마늘 의성종")
+    assert len(driver.session_instance.calls) > 1  # 이름 일치 경로가 없으면 일반 검색
+
+
+def test_graph_search_keeps_a_two_hop_result_when_named_path_exists():
+    path = FakePath(
+        nodes=[
+            FakeNode(labels={"Crop"}, entity_id="C", name="마늘"),
+            FakeNode(labels={"Variety"}, entity_id="V", name="의성종"),
+            FakeNode(labels={"Region"}, entity_id="R", name="경북 의성 및 영남 내륙"),
+        ],
+        relationships=[
+            FakeRelationship("HAS_VARIETY", relation_id="R1", evidence_ids=["E1"], source_chunk_ids=["K1"]),
+            FakeRelationship("SUITABLE_FOR_REGION", relation_id="R2", evidence_ids=["E2"], source_chunk_ids=["K2"]),
+        ],
+    )
+    driver = FakeDriver(
+        rows=[{"path": path}],
+        chunk_rows=[
+            {"chunk_id": "K1", "evidence_id": "E1", "source_id": "S1", "text": "의성종은 마늘 품종이다."},
+            {"chunk_id": "K2", "evidence_id": "E2", "source_id": "S2", "text": "의성종은 의성 지역에 적합하다."},
+        ],
+    )
+
+    results = graph_search(
+        "마늘 의성종 품종은 어떤 지역에 적합한가요? 2홉 경로를 알려주세요",
+        retriever=GraphRetriever(driver), crop="마늘", max_hops=2, limit=10,
+    )
+
+    assert results[0].hop_count == 2
+    assert [edge["original_chunks"][0]["text"] for edge in results[0].path_edges] == [
+        "의성종은 마늘 품종이다.", "의성종은 의성 지역에 적합하다.",
+    ]
+
+
+def test_variety_group_region_question_uses_two_hop_search():
+    driver = FakeDriver()
+
+    GraphRetriever(driver).search(
+        "중만생종 양파는 어느 지역에서 재배하기에 적합한가요?",
+        crop="양파",
+        max_hops=2,
+        limit=10,
+    )
+
+    query, params = driver.session_instance.calls[0]
+    assert "*2..2" in query
+    assert ":`HAS_VARIETY`|`SUITABLE_FOR_REGION`" in query
+    assert params["question"].startswith("중만생종 양파")

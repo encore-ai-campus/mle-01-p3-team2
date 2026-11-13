@@ -24,11 +24,13 @@ from src.retrievers.graph_retriever import (  # noqa: E402
     GraphRetriever,
     graph_search,
 )
+from src.retrievers.answer import neo4j_lookup  # noqa: E402
 from src.retrievers.vector_retriever import (  # noqa: E402
     VectorIndex,
     vector_search,
 )
 from src.supervisor.graph import build_supervisor  # noqa: E402
+from src.supervisor.answer_agent import AnswerAgent  # noqa: E402
 
 
 MODEL_NAME = "BAAI/bge-m3"
@@ -93,9 +95,17 @@ def build_app():
                 **kwargs,
             )
 
+        answer_agent = AnswerAgent.from_env()
         app = build_supervisor(
             graph_search_fn=run_graph_search,
             vector_search_fn=run_vector_search,
+            evidence_lookup=lambda evidence_ids: neo4j_lookup(
+                driver,
+                evidence_ids,
+                database=config["database"],
+            ),
+            cited_answer_generator=answer_agent.generate_cited,
+            citation_support_checker=answer_agent.review_support,
         )
 
         return app, driver

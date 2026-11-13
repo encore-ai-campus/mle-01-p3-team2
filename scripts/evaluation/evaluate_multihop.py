@@ -538,7 +538,9 @@ def build_observer(name: str) -> RetrievalObserver:
         from sentence_transformers import SentenceTransformer
 
         from src.retrievers.graph_retriever import GraphRetriever, graph_search
+        from src.retrievers.answer import Citation, CitedAnswer, Claim, neo4j_lookup
         from src.retrievers.vector_retriever import VectorIndex
+        from src.supervisor.citation_verifier import AnswerReview
         from src.supervisor.graph import build_supervisor
 
         retriever = GraphRetriever.from_env()
@@ -548,8 +550,31 @@ def build_observer(name: str) -> RetrievalObserver:
                 question, retriever=retriever, **kwargs
             ),
             vector_search_fn=index.search,
-            # 채점에는 답변 본문이 필요 없으므로 LLM을 호출하지 않습니다.
-            answer_generator=lambda question, results: "",
+            evidence_lookup=lambda ids: neo4j_lookup(
+                retriever.driver,
+                ids,
+                database=retriever.database,
+            ),
+            # 검색 채점에는 생성 품질이 필요 없으므로 유효한 최소 인용 답변을
+            # 만들어 Supervisor의 검색 경로만 관찰합니다.
+            cited_answer_generator=lambda question, evidences: CitedAnswer(
+                answer=evidences[0].quote if evidences else "",
+                claims=[
+                    Claim(
+                        text=evidences[0].quote,
+                        citations=[
+                            Citation(
+                                evidence_id=evidences[0].evidence_id,
+                                quote=evidences[0].quote,
+                            )
+                        ],
+                    )
+                ] if evidences else [],
+            ),
+            citation_support_checker=lambda claim, contexts: AnswerReview(
+                supported=bool(claim and contexts),
+                reason="검색 경로 평가용 결정적 판정",
+            ),
         )
         return SupervisorRetrievalObserver(app=app)
     
