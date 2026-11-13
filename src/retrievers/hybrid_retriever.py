@@ -16,6 +16,19 @@ def _result_key(result: SearchResult) -> tuple[str, ...]:
     return (result.source, result.text)
 
 
+def _ranking_score(result: SearchResult) -> float:
+    """그래프·벡터 결과를 공통 하이브리드 정렬 점수로 변환합니다."""
+    if result.source == "vector":
+        return float(result.score or 0.0)
+    if result.metadata.get("retrieval_eligible") is False:
+        return -1.0
+    confidence = result.metadata.get("confidence")
+    confidence_score = float(confidence) if confidence is not None else 0.5
+    hop_count = int(result.metadata.get("hop_count", 0) or 0)
+    # 멀티홉 경로를 보존하되, 근거 신뢰도가 지나치게 낮은 경로가 앞서지 않게 합니다.
+    return min(1.0, confidence_score + min(hop_count, 4) * 0.02)
+
+
 def merge_results(
     graph_results: list[SearchResult],
     vector_results: list[SearchResult],
@@ -26,18 +39,46 @@ def merge_results(
     if limit < 1:
         raise ValueError("limit은 양수여야 합니다.")
 
-    merged: list[SearchResult] = []
+    candidates: list[SearchResult] = []
     seen: set[tuple[str, ...]] = set()
-    # 그래프 경로를 먼저 배치해 관계·멀티홉 근거가 결과에서 보존되도록 합니다.
+    # 먼저 중복을 제거하고, 이후 점수 기준으로 정렬합니다.
     for result in [*graph_results, *vector_results]:
         key = _result_key(result)
         if key in seen:
             continue
         seen.add(key)
-        merged.append(result)
-        if len(merged) >= limit:
-            break
-    return merged
+        result.metadata.setdefault("hybrid_score", _ranking_score(result))
+        candidates.append(result)
+    candidates.sort(
+        key=lambda result: (
+            float(result.metadata.get("hybrid_score", 0.0)),
+            1 if result.source == "graph" else 0,
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
+
+
+def build_context(results: list[SearchResult]) -> str:
+    """검색 결과를 출처와 경로가 보존된 답변용 컨텍스트로 구성합니다."""
+    sections: list[str] = []
+    for index, result in enumerate(results, 1):
+        evidence = ", ".join(result.evidence_ids) or "없음"
+        sources = ", ".join(result.source_ids) or "없음"
+        chunks = ", ".join(result.chunk_ids) or "없음"
+        path = " → ".join(result.path or []) or "없음"
+        relations = " → ".join(result.relation_types or []) or "없음"
+        sections.append(
+            f"[근거 {index}] source={result.source}\n"
+            f"내용: {result.text}\n"
+            f"그래프 경로: {path}\n"
+            f"관계 타입: {relations}\n"
+            f"evidence_ids: {evidence}\n"
+            f"source_ids: {sources}\n"
+            f"chunk_ids: {chunks}\n"
+            f"hybrid_score: {result.metadata.get('hybrid_score', 0.0):.4f}"
+        )
+    return "\n\n".join(sections)
 
 
 def hybrid_search(
