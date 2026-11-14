@@ -27,4 +27,3 @@ def generate_answer(supervisor: Supervisor, question: str) -> str:
         return FALLBACK_ANSWER
 
     return answer.strip()
-

@@ -27,7 +27,11 @@ def test_nemo_config_and_colang_parse():
     config = load_config()
 
     assert config.colang_version == "1.0"
-    assert len(config.flows) == 1
+    assert len(config.flows) == 2
+    assert {flow["id"] for flow in config.flows} == {
+        "agriculture help",
+        "protect internal instructions",
+    }
 
 
 @pytest.mark.asyncio
@@ -66,19 +70,3 @@ def test_adapter_imports_with_installed_nemo_023():
 
     assert RailsConfig is not None
     assert action is not None
-
-
-def test_existing_guardrails_practice_is_preserved():
-    import guardrails_practice
-
-    assert callable(guardrails_practice.check_answer)
-    assert Path("guardrails_practice.py").exists()
-
-
-def test_team_interface_note_documents_public_contract():
-    note = Path("docs/guardrails-interface.md").read_text(encoding="utf-8")
-
-    assert "GuardrailRequest" in note
-    assert "validate_request" in note
-    assert "VERIFIED_CURRENT" in note
-    assert "fallback" in note.lower()

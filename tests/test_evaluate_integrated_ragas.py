@@ -179,4 +179,3 @@ def test_build_ragas_rows_joins_references_without_changing_run_records():
         }
     ]
     assert "reference" not in records[0]
-

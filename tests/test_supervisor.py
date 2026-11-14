@@ -70,15 +70,27 @@ def _support_checker(
     )
 
 
+
+def _mock_guardrails(state):
+    """Supervisor 단위 테스트에서는 실제 LLM Judge를 호출하지 않습니다."""
+    return {
+        "guardrail_decision": "ALLOW",
+        "guardrail_reason": "Supervisor 단위 테스트용 Mock",
+        "final_status": state.get("final_status", "ANSWERED"),
+        "final_answer": state.get("final_answer", ""),
+    }
+
+
 def _build_app(**kwargs):
     """Supervisor 공통 테스트 의존성을 주입합니다."""
-
     return build_supervisor(
         evidence_lookup=_evidence_lookup,
         cited_answer_generator=_cited_answer_generator,
         citation_support_checker=_support_checker,
+        guardrails_fn=_mock_guardrails,
         **kwargs,
     )
+
 
 
 def _graph_result():
@@ -175,7 +187,7 @@ def test_supervisor_withholds_after_retry_limit():
     assert state["retry_count"] == 1
 
 def test_supervisor_rejects_out_of_scope_quesion_with_reject_status():
-    def unexpected_search(question, **kwargs): 
+    def unexpected_search(question, **kwargs):
         raise AssertionError("REJECT 질문은 검색을 실행하지 않아야 함")
 
     app = _build_app(

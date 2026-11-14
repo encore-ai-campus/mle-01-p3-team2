@@ -21,6 +21,24 @@ from .answer_agent import AnswerAgent
 from .citation_verifier import SupportChecker, verify_citations
 from .state import GraphState
 
+# Guardrails 연동
+from src.guardrails.input_rail import (
+    input_safety_node,
+    after_input_safety,
+)
+from src.guardrails.dialog_rail import (
+    dialog_node,
+    after_dialog,
+)
+from src.guardrails.retrieval_rail import filter_retrieval_results
+from src.guardrails.execution_adapter import (
+    execution_node,
+    after_execution,
+)
+from src.guardrails.supervisor_adapter import guardrails_node
+from src.guardrails.neo4j_pesticide_lookup import (
+    make_neo4j_pesticide_lookup,
+)
 
 GraphSearch = Callable[..., list[SearchResult]]
 VectorSearch = Callable[..., list[SearchResult]]
@@ -184,6 +202,7 @@ def build_supervisor(
     graph_search_fn: GraphSearch,
     vector_search_fn: VectorSearch,
     evidence_lookup: EvidenceLookup,
+    guardrails_fn=None,
     hybrid_search_fn: Callable[
         ...,
         list[SearchResult],
@@ -191,9 +210,12 @@ def build_supervisor(
     router: QuestionRouter | None = None,
     cited_answer_generator: CitedAnswerGenerator | None = None,
     citation_support_checker: SupportChecker | None = None,
+    pesticide_lookup_fn=None,
+    current_verifier_fn=None,
     max_retries: int = 1,
     result_limit: int = 10,
 ):
+
     """검색부터 인용 검증과 최종 출력까지 연결합니다."""
 
     if max_retries < 0:
@@ -207,6 +229,11 @@ def build_supervisor(
         )
 
     selected_router = router or QuestionRouter()
+    selected_pesticide_lookup = (
+        pesticide_lookup_fn
+        if pesticide_lookup_fn is not None
+        else make_neo4j_pesticide_lookup()
+    )
     selected_hybrid = hybrid_search_fn or hybrid_search
     selected_answer_agent = AnswerAgent.from_env()
 
@@ -325,46 +352,64 @@ def build_supervisor(
             "attemps": attempts,
         }
 
+
     def verify_node(
         state: GraphState,
     ) -> dict[str, Any]:
-        """검색 결과가 공통 Evidence로 변환 가능한지 확인합니다."""
+        """Retrieval Rail과 검색 근거 유효성을 검증합니다."""
 
         results = state.get("results", [])
 
+        # 1. Guardrails: 검색 결과 안전성 검사
+        checked = filter_retrieval_results(
+            results,
+            pesticide_use_requested=(
+                state.get("pesticide_use_requested") is True
+            ),
+        )
+
+        # 2. 안전성 검사 통과 결과만 Evidence 검증
         usable = [
             result
-            for result in results
+            for result in checked.accepted
             if _has_usable_evidence(result)
         ]
 
+        # 3. Guardrails 또는 Evidence 검사에서 탈락한 결과
         rejected = [
             result
             for result in results
-            if not _has_usable_evidence(result)
+            if not any(result is item for item in usable)
         ]
 
+        # 4. 재검색 이전의 탈락 결과도 유지
         accumulated_rejected = [
             *state.get("rejected_results", []),
             *rejected,
         ]
 
-        if usable:
-            return {
-                "results": usable,
-                "rejected_results": accumulated_rejected,
-                "evidence_status": "PASS",
-            }
+        # 5. 기존 경고와 Guardrails 경고 통합
+        warnings = list(dict.fromkeys([
+            *state.get("warnings", []),
+            *checked.warnings,
+        ]))
+
+        if not usable:
+            warnings = _append_warning(
+                warnings,
+                INSUFFICIENT_EVIDENCE_WARNING,
+            )
 
         return {
-            "results": [],
+            "results": usable,
             "rejected_results": accumulated_rejected,
-            "evidence_status": "INSUFFICIENT",
-            "warnings": _append_warning(
-                state.get("warnings", []),
-                INSUFFICIENT_EVIDENCE_WARNING,
+            "retrieval_rejections": checked.rejected,
+            "evidence_status": (
+                "PASS" if usable else "INSUFFICIENT"
             ),
+            "warnings": warnings,
         }
+
 
     def prepare_evidence_node(
         state: GraphState,
@@ -700,11 +745,20 @@ def build_supervisor(
 
         return "withhold"
 
+
+    # =====================================
+    # 1. LangGraph 생성
+    # =====================================
     workflow = StateGraph(GraphState)
 
+    # =====================================
+    # 2. Supervisor / 검색 노드 등록
+    # =====================================
     workflow.add_node("route", route_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("verify", verify_node)
+
+    # Evidence / Citation
     workflow.add_node(
         "prepare_evidence",
         prepare_evidence_node,
@@ -717,13 +771,68 @@ def build_supervisor(
         "verify_citations",
         verify_citations_node,
     )
+
+    # 재검색 / 최종 처리
     workflow.add_node("retry", retry_node)
     workflow.add_node("finalize", finalize_node)
     workflow.add_node("withhold", withhold_node)
     workflow.add_node("reject", reject_node)
 
-    workflow.add_edge(START, "route")
+    # =====================================
+    # 3. Guardrails 노드 등록
+    # =====================================
 
+    # Input / Dialog Rail
+    workflow.add_node(
+        "input_safety",
+        input_safety_node,
+    )
+    workflow.add_node(
+        "dialog",
+        dialog_node,
+    )
+
+    # Execution Rail
+    workflow.add_node(
+        "execution",
+        lambda state: execution_node(
+            state,
+            lookup_fn=selected_pesticide_lookup,
+            current_verifier=current_verifier_fn,
+        ),
+    )
+
+    # Output Guardrails
+    workflow.add_node(
+        "guardrails",
+        guardrails_fn or guardrails_node,
+    )
+
+    # =====================================
+    # 4. START → Input / Dialog Rail
+    # =====================================
+    workflow.add_edge(
+        START,
+        "input_safety",
+    )
+
+    workflow.add_edge(
+        "input_safety",
+        "dialog",
+    )
+
+    workflow.add_conditional_edges(
+        "dialog",
+        after_dialog,
+        {
+            "route": "route",
+            "end": END,
+        },
+    )
+
+    # =====================================
+    # 5. Router → 검색
+    # =====================================
     workflow.add_conditional_edges(
         "route",
         after_route,
@@ -733,7 +842,15 @@ def build_supervisor(
         },
     )
 
-    workflow.add_edge("retrieve", "verify")
+    workflow.add_edge(
+        "retrieve",
+        "verify",
+    )
+
+    # =====================================
+    # 6. Retrieval Rail / Evidence 검증
+    # =====================================
+    # verify_node 내부에서 Retrieval Rail 실행
 
     workflow.add_conditional_edges(
         "verify",
@@ -745,16 +862,34 @@ def build_supervisor(
         },
     )
 
+    # =====================================
+    # 7. Evidence 생성 → Execution Rail
+    # =====================================
     workflow.add_conditional_edges(
         "prepare_evidence",
         after_prepare_evidence,
         {
-            "answer_cited": "answer_cited",
+            "answer_cited": "execution",
             "retry": "retry",
             "withhold": "withhold",
         },
     )
 
+    # =====================================
+    # 8. Execution Rail 검증
+    # =====================================
+    workflow.add_conditional_edges(
+        "execution",
+        after_execution,
+        {
+            "answer": "answer_cited",
+            "end": END,
+        },
+    )
+
+    # =====================================
+    # 9. Citation 답변 생성 및 검증
+    # =====================================
     workflow.add_edge(
         "answer_cited",
         "verify_citations",
@@ -770,9 +905,41 @@ def build_supervisor(
         },
     )
 
-    workflow.add_edge("retry", "retrieve")
-    workflow.add_edge("finalize", END)
-    workflow.add_edge("withhold", END)
-    workflow.add_edge("reject", END)
+    # =====================================
+    # 10. HYBRID 재검색
+    # =====================================
+    workflow.add_edge(
+        "retry",
+        "retrieve",
+    )
 
+    # =====================================
+    # 11. 최종 답변 검증
+    # =====================================
+    workflow.add_edge(
+        "finalize",
+        "guardrails",
+    )
+
+    workflow.add_edge(
+        "guardrails",
+        END,
+    )
+
+    # =====================================
+    # 12. 보류 / 범위 밖 질문 종료
+    # =====================================
+    workflow.add_edge(
+        "withhold",
+        END,
+    )
+
+    workflow.add_edge(
+        "reject",
+        END,
+    )
+
+    # =====================================
+    # 13. 컴파일
+    # =====================================
     return workflow.compile()

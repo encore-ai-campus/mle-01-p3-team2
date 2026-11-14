@@ -95,4 +95,3 @@ def test_build_app_wires_evidence_lookup_and_citation_checker(monkeypatch):
     assert generator.__func__ is _FakeAnswerAgent.generate_cited
     assert captured["evidence_lookup"](["EVD_1"]) == {"EVD_1": {"text": "EVD_1"}}
     assert lookup_calls == [(driver, ["EVD_1"], "farm")]
-
