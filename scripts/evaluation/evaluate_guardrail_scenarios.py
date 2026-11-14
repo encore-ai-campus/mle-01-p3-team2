@@ -39,7 +39,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.evaluation.evaluate_guardrails import validate_cases  # noqa: E402
 from scripts.evaluation.report_io import write_detail_rows, write_summary  # noqa: E402
 
-DEFAULT_CASES_PATH = PROJECT_ROOT / "data" / "evaluation" / "guardrail_eval_set_v1.jsonl"
+DEFAULT_CASES_PATH = PROJECT_ROOT / "data" / "evaluation" / "guardrail_eval_set_v2.jsonl"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "evaluation" / "guardrails"
 
 #: Refusal text defined in src/guardrails/nemo/rails.co.

@@ -426,6 +426,31 @@ def validate_pesticide(
         )
 
     # 5. 수집된 농약 정보 조회
+    # 검증상태 표기가 아예 없는 기록은 조회라도 차단한다. 상태를 확인할 수
+    # 없는 기록은 경고를 붙여도 사용 판단의 근거로 쓰일 수 있다.
+    unknown = [
+        status
+        for status in statuses
+        if status == _UNKNOWN
+    ]
+
+    if unknown:
+        return ValidationResult(
+            allowed=False,
+            decision="BLOCK",
+            reason="농약 등록상태 표기가 없어 확인할 수 없음",
+            fallback_text=(
+                "농약 등록상태를 확인할 수 없어 해당 정보를 "
+                "제공하지 않습니다. 공식 등록사항과 제품 라벨을 "
+                "직접 확인해 주세요."
+            ),
+            details={
+                "statuses": statuses,
+                "unknown_statuses": unknown,
+                "status_conflict": status_conflict,
+            },
+        )
+
     if unconfirmed or status_conflict:
         return ValidationResult(
             allowed=True,
