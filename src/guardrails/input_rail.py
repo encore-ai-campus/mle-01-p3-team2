@@ -63,6 +63,19 @@ DANGEROUS = re.compile(
     re.IGNORECASE,
 )
 
+# 타인의 작물·재산을 가해하려는 요청. DANGEROUS는 사람·동물 가해와 과다 살포만
+# 보기 때문에 "옆집 밭을 말려 죽이려면" 같은 요청이 UNCERTAIN으로 빠져
+# 되묻기 응답을 받는다. 의도가 문장에 드러난 경우는 되묻지 않고 거절한다.
+HARM_OTHERS = re.compile(
+    r"(옆집|이웃|남의|타인|다른\s*사람|윗집|아랫집)[^.?!\n]{0,40}"
+    r"(죽이려|죽이는\s*(법|방법|약|농약|제초제)|고사시키|말려\s*죽|"
+    r"없애려|망치려|해치려|시들게\s*하)"
+    r"|"
+    r"(몰래|티\s*안\s*나게|들키지\s*않|흔적\s*없이|표\s*안\s*나게)"
+    r"[^.?!\n]{0,40}(뿌[리려릴린]|살포|섞|타서|주입)",
+    re.IGNORECASE,
+)
+
 RECOMMENDATION = re.compile(
     r"추천|골라\s*줘|선택해\s*줘|"
     r"사용해도|써도\s*돼|살포해도|"
@@ -96,6 +109,11 @@ BLOCK_RESPONSE = (
 INJECTION_RESPONSE = (
     "안전 규칙을 변경하거나 우회하는 요청은 "
     "처리할 수 없습니다."
+)
+
+HARM_RESPONSE = (
+    "타인의 작물이나 재산에 피해를 주기 위한 농약·제초제 "
+    "사용 방법은 안내할 수 없습니다."
 )
 
 UNCERTAIN_RESPONSE = (
@@ -149,7 +167,17 @@ def classify_input(question: str) -> InputDecision:
             response=BLOCK_RESPONSE,
         )
 
-    # 4. 일반 농업 질문
+    # 4. 타인 작물·재산 가해 요청
+    if HARM_OTHERS.search(question):
+        return InputDecision(
+            intent="HARMFUL_INTENT",
+            allowed=False,
+            pesticide_use_requested=bool(PESTICIDE.search(question)),
+            reason="타인 작물·재산 가해 의도 탐지",
+            response=HARM_RESPONSE,
+        )
+
+    # 5. 일반 농업 질문
     if not PESTICIDE.search(question):
         return InputDecision(
             intent="GENERAL",
@@ -158,7 +186,7 @@ def classify_input(question: str) -> InputDecision:
             reason="일반 농업 질문",
         )
 
-    # 5. 현재 농약 사용 추천
+    # 6. 현재 농약 사용 추천
     if RECOMMENDATION.search(question):
         return InputDecision(
             intent="PESTICIDE_RECOMMENDATION",
@@ -167,7 +195,7 @@ def classify_input(question: str) -> InputDecision:
             reason="현재 농약 사용 추천 요청",
         )
 
-    # 6. 농약 등록정보 및 안전정보 조회
+    # 7. 농약 등록정보 및 안전정보 조회
     if LOOKUP.search(question):
         return InputDecision(
             intent="PESTICIDE_LOOKUP",
@@ -176,7 +204,7 @@ def classify_input(question: str) -> InputDecision:
             reason="농약 정보 조회 요청",
         )
 
-    # 7. 농약 관련 의도가 불명확한 질문
+    # 8. 농약 관련 의도가 불명확한 질문
     return InputDecision(
         intent="UNCERTAIN",
         allowed=False,
@@ -205,13 +233,15 @@ def input_safety_node(state: dict[str, Any]) -> dict[str, Any]:
     update.update({
         "guardrail_decision": (
             "BLOCK"
-            if decision.intent in ("DANGEROUS_USE", "INJECTION")
+            if decision.intent in (
+                "DANGEROUS_USE", "INJECTION", "HARMFUL_INTENT"
+            )
             else "FALLBACK"
         ),
         "final_status": (
             "EMERGENCY" if is_emergency else
             "BLOCKED" if decision.intent in (
-                "DANGEROUS_USE", "INJECTION"
+                "DANGEROUS_USE", "INJECTION", "HARMFUL_INTENT"
             ) else "WITHHELD"
         ),
         "final_answer": decision.response,
