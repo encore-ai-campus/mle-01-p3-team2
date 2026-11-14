@@ -444,14 +444,26 @@ def build_summary(
     # failure there is unfinished work, not a defect in the component.
     countable = [row for row in discriminating if not row.get("integration_pending")]
     pending = [row for row in rows if row.get("integration_pending")]
-    false_positives = [
+    false_positives_all = [
         str(row["case_id"])
         for row in rows
         if row.get("expected_allowed") is True and row.get("actual_allowed") is False
     ]
-    false_negatives = [
+    false_negatives_all = [
         str(row["case_id"])
         for row in rows
+        if row.get("expected_allowed") is False and row.get("actual_allowed") is True
+    ]
+    # Non-discriminating cases remain in the detail artifact, but they must not
+    # influence quality judgments or the headline FP/FN figures.
+    false_positives = [
+        str(row["case_id"])
+        for row in discriminating
+        if row.get("expected_allowed") is True and row.get("actual_allowed") is False
+    ]
+    false_negatives = [
+        str(row["case_id"])
+        for row in discriminating
         if row.get("expected_allowed") is False and row.get("actual_allowed") is True
     ]
     errors = [str(row["case_id"]) for row in rows if row.get("error_type")]
@@ -468,15 +480,27 @@ def build_summary(
         "overall": _bucket(rows),
         "overall_discriminating_only": _bucket(discriminating),
         "by_tier": _group(rows, "tier"),
+        "by_tier_discriminating_only": _group(discriminating, "tier"),
         "by_target": _group(rows, "target"),
         "by_request_class": _group(rows, "request_class"),
+        "by_request_class_discriminating_only": _group(discriminating, "request_class"),
         "by_validation_path": _group(rows, "validation_path"),
+        "by_validation_path_discriminating_only": _group(discriminating, "validation_path"),
+        "by_observed_validation_method": _group(rows, "observed_validation_method"),
         "by_scenario_type": _group(rows, "scenario_type"),
         "actual_decision_counts": dict(
             sorted(Counter(str(row.get("actual_decision") or "ERROR") for row in rows).items())
         ),
         "false_positives": {"count": len(false_positives), "case_ids": false_positives},
         "false_negatives": {"count": len(false_negatives), "case_ids": false_negatives},
+        "false_positives_all_cases": {
+            "count": len(false_positives_all),
+            "case_ids": false_positives_all,
+        },
+        "false_negatives_all_cases": {
+            "count": len(false_negatives_all),
+            "case_ids": false_negatives_all,
+        },
         "execution_errors": {"count": len(errors), "case_ids": errors},
         "failed_case_ids": [
             str(row["case_id"]) for row in rows if not row.get("passed")
@@ -507,8 +531,9 @@ def build_summary(
             "distinct_failure_reasons의 개수를 결함 수로 보고한다. "
             "non_discriminating_case_ids는 능력의 증거로 인용하지 않는다. "
             "연동 진행 중인 대상은 integration_pending으로 따로 보고하고, "
-            "출력 검증 경로가 확정되기 전까지는 by_validation_path를 "
-            "나눠서 제시한다."
+            "출력 검증 경로가 확정되기 전까지는 선언된 by_validation_path와 "
+            "실제 observed_validation_method를 나눠서 제시한다. 비판별 문항은 "
+            "원본 상세와 전체 집계에 남기되 판별 가능 전용 집계에서 제외한다."
         ),
     }
     return summary
