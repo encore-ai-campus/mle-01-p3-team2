@@ -1,10 +1,13 @@
 """Evaluate initial routing and expected-route retrieval in one report.
 
 Run with existing Top-10 data:
-    python -m scripts.evaluation.evaluate_retrieval
+    .venv/Scripts/python.exe -m scripts.evaluation.evaluate_retrieval
 
 Refresh real Neo4j results first:
-    python -m scripts.evaluation.evaluate_retrieval --collect
+    .venv/Scripts/python.exe -m scripts.evaluation.evaluate_retrieval --collect
+
+Check Neo4j connectivity only:
+    .venv/Scripts/python.exe -m scripts.evaluation.evaluate_retrieval --check-neo4j
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -71,17 +75,39 @@ def _hit_row(rank: int, result: SearchResult) -> dict[str, Any]:
     }
 
 
-def collect_top10(cases: list[dict], path: Path, router: QuestionRouter) -> None:
-    """Run each non-REJECT case through its expected retrieval path."""
+def _open_neo4j_for_evaluation() -> Any:
+    """Load this project's .env and verify Neo4j before model loading/search."""
     from dotenv import load_dotenv
-    from sentence_transformers import SentenceTransformer
 
     from src.retrievers.graph_retriever import GraphRetriever
+
+    env_path = PROJECT_ROOT / ".env"
+    dotenv_loaded = load_dotenv(env_path)
+    print(
+        f"Project .env loaded: {dotenv_loaded} "
+        "(existing process environment variables take precedence).",
+        flush=True,
+    )
+    print("Checking Neo4j connectivity before evaluation...", flush=True)
+    try:
+        graph = GraphRetriever.from_env()
+    except Exception as exc:
+        raise ConnectionError(
+            f"Neo4j preflight failed ({type(exc).__name__}): {exc}"
+        ) from exc
+    print("Neo4j connectivity check passed.", flush=True)
+    return graph
+
+
+def collect_top10(
+    cases: list[dict], path: Path, router: JevQuestionRouter, graph: Any
+) -> None:
+    """Run each non-REJECT case through its expected retrieval path."""
+    from sentence_transformers import SentenceTransformer
+
     from src.retrievers.hybrid_retriever import hybrid_search
     from src.retrievers.vector_retriever import VectorIndex
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    graph = GraphRetriever.from_env()
     try:
         vector = VectorIndex(
             graph.driver,
@@ -562,11 +588,23 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=REPORT_DIR)
     parser.add_argument("--relations", type=Path, default=PROJECT_ROOT / "data" / "processed" / "relations.jsonl")
     parser.add_argument("--collect", action="store_true", help="Refresh Top-10 from Neo4j")
+    parser.add_argument(
+        "--check-neo4j", action="store_true",
+        help="Check Neo4j connectivity using this project's .env, then exit",
+    )
     args = parser.parse_args()
     cases = load_golden_cases(args.golden_set)
     router = JevQuestionRouter.from_env()
+    graph = None
+    if args.collect or args.check_neo4j:
+        print(f"Python executable: {sys.executable}", flush=True)
+        graph = _open_neo4j_for_evaluation()
+        if args.check_neo4j and not args.collect:
+            graph.close()
+            print("Neo4j preflight passed.")
+            return
     if args.collect:
-        collect_top10(cases, args.top10, router)
+        collect_top10(cases, args.top10, router, graph)
     top10 = _read_top10(args.top10, cases)
     details, summary = evaluate(cases, top10, router)
     multihop_details, multihop_summary = evaluate_multihop_paths(
@@ -574,7 +612,28 @@ def main() -> None:
     )
     write_reports(details, summary, multihop_details, multihop_summary, args.output_dir)
     print(f"Wrote {len(details)} questions to {args.output_dir}")
+    print(f"Overall routing accuracy: {summary['routing']['accuracy']:.2%}")
+    for route in SEARCH_ROUTES:
+        route_summary = summary["by_expected_route"][route]
+        hits = ", ".join(
+            f"Hit@{k}={route_summary[f'hit_at_{k}']['hits']}/{route_summary['questions']}"
+            for k in KS
+        )
+        accuracy = route_summary["routing_accuracy"]
+        print(
+            f"{route}: routing accuracy="
+            f"{'N/A' if accuracy is None else f'{accuracy:.2%}'}, {hits}"
+        )
+    print(
+        "Multi-hop full success: "
+        f"{multihop_summary['full_success']}/{multihop_summary['graph_path_questions']} "
+        f"({multihop_summary['full_success_rate']:.2%})"
+    )
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ConnectionError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

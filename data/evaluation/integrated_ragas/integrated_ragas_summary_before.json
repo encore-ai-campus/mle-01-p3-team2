@@ -1,0 +1,44 @@
+{
+  "total_cases": 67,
+  "successful_runs": 67,
+  "error_counts": {},
+  "ragas_evaluated_cases": 57,
+  "ragas_metrics": {
+    "faithfulness": 0.6067668310783839,
+    "answer_relevancy": 0.1610775150595671,
+    "answer_correctness": 0.3064179883073961,
+    "context_precision": 0.28352813851598846,
+    "context_recall": 0.4070175438596491,
+    "context_relevance": 0.5614035087719298
+  },
+  "chunk_hit_at_k": 0.19298245614035087,
+  "evidence_hit_at_k": 0.19298245614035087,
+  "structural_pass_rate": 0.7164179104477612,
+  "by_question_type": {
+    "comparison": {
+      "count": 1,
+      "structural_pass_rate": 0.0,
+      "answer_correctness": 0.0644320940507897
+    },
+    "fact": {
+      "count": 18,
+      "structural_pass_rate": 0.7222222222222222,
+      "answer_correctness": 0.4777370220769364
+    },
+    "multi_hop": {
+      "count": 19,
+      "structural_pass_rate": 0.47368421052631576,
+      "answer_correctness": 0.21782173394952778
+    },
+    "out_of_scope": {
+      "count": 10,
+      "structural_pass_rate": 1.0,
+      "answer_correctness": null
+    },
+    "relation": {
+      "count": 19,
+      "structural_pass_rate": 0.8421052631578947,
+      "answer_correctness": 0.2454480998444685
+    }
+  }
+}
