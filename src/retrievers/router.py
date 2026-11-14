@@ -103,6 +103,19 @@ class QuestionRouter:
     )
     CROPS = ("상추", "양파", "마늘", "고추", "배추")
 
+    # 글을 지어 달라는 요청. 작물 이름이 섞여 있어도 농업 지식 질의가 아닙니다.
+    CREATIVE_REQUEST_PATTERN = re.compile(
+        r"(?:시|글|노래|가사|편지|축사|축하\s*문구|동화|수필|에세이|랩)"
+        r"\s*(?:를|을)?\s*(?:한\s*(?:편|곡|수)\s*)?"
+        r"(?:써|지어|작성해|만들어|창작)"
+        r"|작사|작곡|라임"
+    )
+
+    # 목록에 없는 병해충 이름을 도메인 신호로 인정하기 위한 접미사 규칙입니다.
+    PEST_NAME_PATTERN = re.compile(
+        r"[가-힣]{2,}(?:병|나방|진딧물|응애|총채벌레|잎벌레|굴파리|선충|균|곰팡이)"
+    )
+
     # 작물 이름이 들어 있어도 이 말뭉치로 답할 수 없는 요청입니다.
     # 창작·투자·상품 추천·연예·법률처럼 농업 자료와 무관한 작업 의도를 가리킵니다.
     OUT_OF_SCOPE_INTENT_TERMS = (
@@ -155,6 +168,18 @@ class QuestionRouter:
             return RouteDecision("REJECT", "질문이 비어 있습니다.", warnings=[])
 
         lowered = normalized.lower()
+
+        # 작물·병해충 이름이 들어 있어도 글을 지어 달라는 요청은 농업 지식
+        # 질의가 아닙니다. 단어 단위로는 '시비'·'시설재배'처럼 흔한 농업 용어와
+        # 겹치므로 요청 형태를 패턴으로 봅니다.
+        creative = self.CREATIVE_REQUEST_PATTERN.search(normalized)
+        if creative is not None:
+            return RouteDecision(
+                "REJECT",
+                f"농업 자료로 답할 수 없는 창작 요청입니다(‘{creative.group(0)}’).",
+                warnings=[],
+            )
+
         blocked = next(
             (term for term in self.OUT_OF_SCOPE_INTENT_TERMS if term in lowered), None
         )
@@ -165,7 +190,13 @@ class QuestionRouter:
                 warnings=[],
             )
 
-        if not any(term in lowered for term in self.DOMAIN_TERMS):
+        # 키워드 목록에 없는 병해충 이름도 도메인 신호로 봅니다. 목록에 없다는
+        # 이유로 막으면 말뭉치에 근거가 있는 질문까지 검색 전에 버립니다.
+        # 근거가 없는 경우는 검색 뒤 답변 보류로 처리합니다.
+        has_domain_term = any(term in lowered for term in self.DOMAIN_TERMS)
+        has_pest_name = self.PEST_NAME_PATTERN.search(normalized) is not None
+
+        if not has_domain_term and not has_pest_name:
             return RouteDecision(
                 "REJECT",
                 "농업 도메인 신호가 없어 말뭉치 범위 밖으로 판단했습니다.",

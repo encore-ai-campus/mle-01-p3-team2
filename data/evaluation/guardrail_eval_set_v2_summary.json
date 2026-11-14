@@ -1,0 +1,436 @@
+{
+  "generated_at": "2026-11-14T16:44:41+09:00",
+  "eval_set_version": "v2",
+  "total_cases": 108,
+  "seed": 42,
+  "include_judge_tier": false,
+  "source_paths": {
+    "golden_set": "data/evaluation/golden_set_final.jsonl",
+    "chunks": "data/processed/chunks.jsonl"
+  },
+  "output_path": "data/evaluation/guardrail_eval_set_v2.jsonl",
+  "output_sha256": "ef3e42429aa3805c20e1746e59465e9d976bf82a4c0150bd17fd24cd70dea3a8",
+  "tier_counts": {
+    "A_structure": 17,
+    "B_pesticide": 18,
+    "C_grounding": 19,
+    "D_golden": 28,
+    "F_contract": 4,
+    "G_input_rail": 18,
+    "H_supervisor_adapter": 4
+  },
+  "target_counts": {
+    "guardrail_pipeline": 85,
+    "router_scope_gate": 18,
+    "supervisor_adapter": 4
+  },
+  "request_class_counts": {
+    "irrelevant": 11,
+    "normal": 44,
+    "quality_risk": 37,
+    "unsafe_request": 16
+  },
+  "scenario_counts": {
+    "evidence_contract": 17,
+    "golden_answer": 12,
+    "golden_answer_with_warning": 8,
+    "grounding": 9,
+    "grounding_over_block_probe": 4,
+    "grounding_under_block_probe": 2,
+    "input_contract": 1,
+    "input_over_block_probe": 1,
+    "input_under_block_probe": 1,
+    "irrelevant_request": 9,
+    "normal_request": 6,
+    "out_of_scope_not_covered": 4,
+    "pesticide_policy": 18,
+    "pipeline_order": 4,
+    "quality_risk": 3,
+    "request_contract": 4,
+    "unsafe_request": 1,
+    "warning_source_not_covered": 4
+  },
+  "expected_decision_counts": {
+    "ALLOW": 29,
+    "BLOCK": 47,
+    "FALLBACK": 16,
+    "WARN": 16
+  },
+  "coverage": {
+    "registered_branches": 84,
+    "expected_in_this_build": 72,
+    "covered": 72,
+    "uncovered": [],
+    "by_branch": {
+      "CT-ANSWER-NON-STRING": [
+        "GF002"
+      ],
+      "CT-BOT-MESSAGE": [
+        "GF001"
+      ],
+      "CT-EVIDENCE-NONE": [
+        "GF004"
+      ],
+      "CT-QUESTION-NON-STRING": [
+        "GF003"
+      ],
+      "EV-EMPTY": [
+        "GA001"
+      ],
+      "EV-ID-DUPLICATE": [
+        "GA015"
+      ],
+      "EV-ID-LEADING-DIGIT": [
+        "GA013"
+      ],
+      "EV-ID-MALFORMED": [
+        "GA011"
+      ],
+      "EV-ID-NON-STRING": [
+        "GA010"
+      ],
+      "EV-ID-NONE": [
+        "GA014"
+      ],
+      "EV-ID-SECOND-UNDERSCORE": [
+        "GA012"
+      ],
+      "EV-IDS-NOT-LIST": [
+        "GA009"
+      ],
+      "EV-ITEM-TYPE": [
+        "GA003"
+      ],
+      "EV-META-TYPE": [
+        "GA008"
+      ],
+      "EV-MULTI-OK": [
+        "GA016"
+      ],
+      "EV-NOT-LIST": [
+        "GA002"
+      ],
+      "EV-PARTIAL-INVALID": [
+        "GA017"
+      ],
+      "EV-SOURCE-INVALID": [
+        "GA004"
+      ],
+      "EV-SOURCE-MISSING": [
+        "GA005"
+      ],
+      "EV-TEXT-EMPTY": [
+        "GA006"
+      ],
+      "EV-TEXT-TYPE": [
+        "GA007"
+      ],
+      "GD-ANSWER": [
+        "GD001",
+        "GD002",
+        "GD003",
+        "GD004",
+        "GD005",
+        "GD006",
+        "GD007",
+        "GD008",
+        "GD009",
+        "GD010",
+        "GD011",
+        "GD012"
+      ],
+      "GD-REJECT-NOT-COVERED": [
+        "GD025",
+        "GD026",
+        "GD027",
+        "GD028"
+      ],
+      "GD-WARNING": [
+        "GD013",
+        "GD015",
+        "GD017",
+        "GD018",
+        "GD019",
+        "GD020",
+        "GD021",
+        "GD022"
+      ],
+      "GD-WARNING-NOT-COVERED": [
+        "GD014",
+        "GD016",
+        "GD023",
+        "GD024"
+      ],
+      "IR-BLOCKED-TERM-IN-DOMAIN": [
+        "GG016"
+      ],
+      "IR-EMPTY-QUESTION": [
+        "GG015"
+      ],
+      "IR-IN-SCOPE-PASS": [
+        "GG009",
+        "GG010",
+        "GG011",
+        "GG012",
+        "GG013",
+        "GG014"
+      ],
+      "IR-NO-DOMAIN-SIGNAL": [
+        "GG017"
+      ],
+      "IR-OFF-TASK-WITH-DOMAIN-TERM": [
+        "GG018"
+      ],
+      "IR-OUT-OF-SCOPE": [
+        "GG001",
+        "GG002",
+        "GG003",
+        "GG004",
+        "GG005",
+        "GG006",
+        "GG007",
+        "GG008"
+      ],
+      "OUT-EMPTY-ANSWER": [
+        "GC001"
+      ],
+      "OUT-ENTITY-SWAP": [
+        "GC013"
+      ],
+      "OUT-EXTRA-CLAIM": [
+        "GC015"
+      ],
+      "OUT-FACT-BLANK": [
+        "GC002"
+      ],
+      "OUT-FACT-NOT-IN-ANSWER": [
+        "GC004"
+      ],
+      "OUT-FACT-NOT-IN-EVIDENCE": [
+        "GC003"
+      ],
+      "OUT-NEGATION": [
+        "GC012"
+      ],
+      "OUT-NUMBER-FORMAT": [
+        "GC010"
+      ],
+      "OUT-NUMBER-PARTICLE": [
+        "GC009"
+      ],
+      "OUT-PARAPHRASE": [
+        "GC008"
+      ],
+      "OUT-SAFE-GUIDANCE": [
+        "GC011"
+      ],
+      "OUT-UNIT-SWAP": [
+        "GC014"
+      ],
+      "OUT-UNSUPPORTED-NUMBER": [
+        "GC006"
+      ],
+      "OUT-UNSUPPORTED-SENTENCE": [
+        "GC005"
+      ],
+      "OUT-VERBATIM-OK": [
+        "GC007"
+      ],
+      "PL-EVIDENCE-FIRST": [
+        "GC016"
+      ],
+      "PL-PESTICIDE-BEFORE-OUTPUT": [
+        "GC017"
+      ],
+      "PL-WARN-PROMOTION": [
+        "GC019"
+      ],
+      "PL-WARN-WITH-FALLBACK": [
+        "GC018"
+      ],
+      "PS-CURRENT-INFO": [
+        "GB003"
+      ],
+      "PS-CURRENT-USE": [
+        "GB002"
+      ],
+      "PS-EXPIRED-USE": [
+        "GB007"
+      ],
+      "PS-MIXED-INFO": [
+        "GB011"
+      ],
+      "PS-MIXED-USE": [
+        "GB010"
+      ],
+      "PS-NO-STATUS-INFO": [
+        "GB013"
+      ],
+      "PS-NO-STATUS-USE": [
+        "GB012"
+      ],
+      "PS-NOT-PESTICIDE": [
+        "GB001"
+      ],
+      "PS-OFFICIAL-VERIFIED-USE": [
+        "GB018"
+      ],
+      "PS-PRELIMINARY-USE": [
+        "GB005"
+      ],
+      "PS-REJECTED-USE": [
+        "GB008"
+      ],
+      "PS-REVIEW-USE": [
+        "GB006"
+      ],
+      "PS-STATUS-FROM-TEXT": [
+        "GB014"
+      ],
+      "PS-STATUS-NORMALIZE": [
+        "GB015"
+      ],
+      "PS-STATUS-REQUEST-META": [
+        "GB016"
+      ],
+      "PS-UNCONFIRMED-INFO": [
+        "GB009"
+      ],
+      "PS-UNKNOWN-USE": [
+        "GB004"
+      ],
+      "PS-USE-WITHOUT-PESTICIDE": [
+        "GB017"
+      ],
+      "SA-EXECUTION-RAIL-BYPASS": [
+        "GH004"
+      ],
+      "SA-INTENT-UNCLASSIFIED": [
+        "GH003"
+      ],
+      "SA-NO-ANSWER": [
+        "GH002"
+      ],
+      "SA-NO-EVIDENCE": [
+        "GH001"
+      ]
+    },
+    "new_branches_not_in_builder": [
+      "PS-OFFICIAL-VERIFIED-USE"
+    ],
+    "new_branch_descriptions": {
+      "PS-OFFICIAL-VERIFIED-USE": "공식 검증 플래그와 사용조건 대조가 모두 충족된 사용 요청은 허용"
+    }
+  },
+  "non_discriminating_case_ids": [
+    "GD014",
+    "GD016",
+    "GD023",
+    "GD024",
+    "GD025",
+    "GD026",
+    "GD027",
+    "GD028"
+  ],
+  "review_required": true,
+  "review_note": "쟁점 3건(GC004 FALLBACK 유지, GC010 ALLOW 유지, GB013 BLOCK으로 변경)은 2026-11-14 팀 확정으로 label_review_status=reviewed 처리했다. 나머지 문항은 아직 검수 전이다(label_review_status=unreviewed). 이 결정은 평가셋 파일에 직접 반영했고 빌더에는 반영하지 않았으므로, build_guardrail_eval_set.py로 재생성하면 되돌아간다.",
+  "contestable_case_ids": [],
+  "golden_source_case_ids": [
+    "GS001",
+    "GS002",
+    "GS003",
+    "GS005",
+    "GS006",
+    "GS007",
+    "GS008",
+    "GS009",
+    "GS010",
+    "GS012",
+    "GS013",
+    "GS015",
+    "GS016",
+    "GS017",
+    "GS019",
+    "GS024",
+    "GS025",
+    "GS028",
+    "GS029",
+    "GS030",
+    "GS036",
+    "GS037",
+    "GS039",
+    "GS044",
+    "GS046",
+    "GS047",
+    "GS048",
+    "GS050",
+    "GS051",
+    "GS053",
+    "GS054",
+    "GS058",
+    "GS059",
+    "GS063",
+    "GS064",
+    "GS065"
+  ],
+  "labeling_policy": "expected_decision은 가드레일 구현이 아니라 안전·품질 정책에서 도출했다. 따라서 미통과 케이스는 평가셋 결함이 아니라 구현 결함 후보로 읽어야 한다.",
+  "runner": "scripts/evaluation/evaluate_guardrail_scenarios.py 로 실행한다. target이 여러 개이므로 evaluate_guardrails.py로는 실행할 수 없다.",
+  "integration_status": {
+    "guardrail_wiring": "in_progress",
+    "note": "가드레일 연동이 아직 진행 중이다. 이 평가셋의 결과는 완성된 시스템의 품질 지표가 아니라 미완성 상태의 스냅샷이다. integration_pending=true 케이스는 배선이 끝나기 전까지 결함으로 집계하지 않는다.",
+    "integration_pending_case_ids": [],
+    "open_design_decision": "해소됨: 출력 검증 경로를 LLM 판사로 통일했다(팀 결정 2026-11-14). 운영 경로인 supervisor_adapter와 D_golden이 같은 경로를 쓴다. C_grounding의 일부 프로브는 규칙 경로의 한계를 측정하기 위해 의도적으로 expected_facts를 유지한다.",
+    "validation_path_counts": {
+      "expected_facts_rule": 58,
+      "llm_judge": 32,
+      "not_applicable": 18
+    }
+  },
+  "reporting_rules": [
+    "연동이 진행 중이다. 전체 통과율을 시스템 품질로 제시하지 말고, integration_pending과 validation_path를 분리해 보고한다.",
+    "요구사항의 정상·무관·위험 3종은 request_class로 집계한다(normal / irrelevant / unsafe_request, 그 외는 quality_risk).",
+    "무관 요청은 G_input_rail(router.scope_gate), 사용자가 실제로 받는 메시지는 H_nemo_rails에서 측정한다.",
+    "전체 통과율을 단일 성능 지표로 제시하지 말 것. tier별로 분리해 보고한다.",
+    "A_structure·B_pesticide는 단위 규칙 검증이며 서비스 품질 지표가 아니다.",
+    "B_pesticide는 근거 일치를 상수로 고정(답변=근거 원문)해 농약 규칙만 분리한 설계다.",
+    "C_grounding의 grounding_over_block_probe는 과차단, grounding_under_block_probe는 과허용을 탐지한다.",
+    "D_golden은 실제 서비스 입력에 가장 가까운 tier이며 오탐률의 근거다.",
+    "non_discriminating_case_ids의 통과도, 미통과도 능력이나 결함의 증거로 인용하지 말 것.",
+    "E_judge는 유료 API를 호출하므로 포함 여부와 모델·호출 시각을 함께 기록한다.",
+    "미통과 건수는 결함 개수가 아니다. 같은 원인으로 묶인 케이스가 많으므로 details의 사유별로 묶어 '서로 다른 결함 N개'로 보고한다.",
+    "F_contract는 통합 계층(from_mapping)의 입력 보정을 검증한다. 컴포넌트 품질이 아니라 연동 안전성 지표로 읽는다."
+  ],
+  "known_corpus_limits": [
+    "data/processed/chunks.jsonl에는 검증상태 VERIFIED_CURRENT 청크가 없다(PRELIMINARY_PASS 4224건, REVIEW_REQUIRED 910건). 따라서 농약 사용 추천 허용 경로는 실데이터로 재현할 수 없고 PS-CURRENT-* 케이스는 합성 근거를 사용한다.",
+    "src/guardrails에는 질문 관련성 규칙이 없다. 범위 밖 질문 차단은 src/retrievers/router.py의 scope_gate(키워드 기반)가 검색 이전에 수행하므로, 무관 요청 시나리오는 이 평가셋이 아니라 라우터 또는 통합 경로에서 측정해야 한다(GD-REJECT-NOT-COVERED).",
+    "validate_request는 NeMo Colang 액션 src/guardrails/nemo/actions.py의 validate_graph_rag_response가 호출한다. 다만 nemo/config.yml에는 rails.output만 정의되어 있고 rails.input이 없다. 이 평가셋은 검증기를 직접 호출하는 컴포넌트 단위 평가이며 rails를 통과한 통합 동작을 대표하지 않는다."
+  ],
+  "builder_divergence": "다음 결정을 평가셋 파일에 직접 반영했고 scripts/evaluation/build_guardrail_eval_set.py에는 반영하지 않았다. 빌더로 재생성하면 되돌아간다: GB013 BLOCK, GC004 FALLBACK 유지, GC010 ALLOW 유지, GB002·GB014·GB015 BLOCK, GB003 WARN, GB018 양성 대조군 추가. coverage 항목은 빌더의 분기 레지스트리 기준이므로 PS-OFFICIAL-VERIFIED-USE가 반영되어 있지 않다. GG016 BLOCK도 추가로 반영했다. D_golden 판사 경로 통일과 coverage 신규 분기도 파일에만 반영했다.",
+  "paid_call_case_ids": [
+    "GD001",
+    "GD002",
+    "GD003",
+    "GD004",
+    "GD005",
+    "GD006",
+    "GD007",
+    "GD008",
+    "GD009",
+    "GD010",
+    "GD011",
+    "GD012",
+    "GD013",
+    "GD014",
+    "GD015",
+    "GD016",
+    "GD017",
+    "GD018",
+    "GD019",
+    "GD020",
+    "GD021",
+    "GD022",
+    "GD023",
+    "GD024"
+  ],
+  "paid_call_note": "기본 실행 1회당 OpenAI 호출 24건이 발생한다. D_golden을 판사 경로로 통일한 결과이며, 근거가 빈 케이스는 근거 검증에서 먼저 차단되어 호출되지 않는다."
+}
