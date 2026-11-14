@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-11-14T16:44:41+09:00",
   "eval_set_version": "v1",
-  "total_cases": 107,
+  "total_cases": 108,
   "seed": 42,
   "include_judge_tier": false,
   "source_paths": {
@@ -9,10 +9,10 @@
     "chunks": "data/processed/chunks.jsonl"
   },
   "output_path": "data/evaluation/guardrail_eval_set_v1.jsonl",
-  "output_sha256": "36c31921de2fbf29a12048743b7841c8a0ab3c13ba15ce09b2c588a4271763fb",
+  "output_sha256": "4f061b7ebb95cd618a759667d53dcc63452c5e31cd3b6839e0bdd65ef438d6a9",
   "tier_counts": {
     "A_structure": 17,
-    "B_pesticide": 17,
+    "B_pesticide": 18,
     "C_grounding": 19,
     "D_golden": 28,
     "F_contract": 4,
@@ -25,10 +25,10 @@
     "supervisor_adapter": 4
   },
   "request_class_counts": {
-    "irrelevant": 10,
-    "normal": 45,
+    "irrelevant": 11,
+    "normal": 44,
     "quality_risk": 37,
-    "unsafe_request": 15
+    "unsafe_request": 16
   },
   "scenario_counts": {
     "evidence_contract": 17,
@@ -38,12 +38,12 @@
     "grounding_over_block_probe": 4,
     "grounding_under_block_probe": 2,
     "input_contract": 1,
-    "input_over_block_probe": 2,
+    "input_over_block_probe": 1,
     "input_under_block_probe": 1,
-    "irrelevant_request": 8,
+    "irrelevant_request": 9,
     "normal_request": 6,
     "out_of_scope_not_covered": 4,
-    "pesticide_policy": 17,
+    "pesticide_policy": 18,
     "pipeline_order": 4,
     "quality_risk": 3,
     "request_contract": 4,
@@ -51,10 +51,10 @@
     "warning_source_not_covered": 4
   },
   "expected_decision_counts": {
-    "ALLOW": 33,
-    "BLOCK": 43,
+    "ALLOW": 29,
+    "BLOCK": 47,
     "FALLBACK": 16,
-    "WARN": 15
+    "WARN": 16
   },
   "coverage": {
     "registered_branches": 83,
@@ -395,5 +395,6 @@
     "data/processed/chunks.jsonl에는 검증상태 VERIFIED_CURRENT 청크가 없다(PRELIMINARY_PASS 4224건, REVIEW_REQUIRED 910건). 따라서 농약 사용 추천 허용 경로는 실데이터로 재현할 수 없고 PS-CURRENT-* 케이스는 합성 근거를 사용한다.",
     "src/guardrails에는 질문 관련성 규칙이 없다. 범위 밖 질문 차단은 src/retrievers/router.py의 scope_gate(키워드 기반)가 검색 이전에 수행하므로, 무관 요청 시나리오는 이 평가셋이 아니라 라우터 또는 통합 경로에서 측정해야 한다(GD-REJECT-NOT-COVERED).",
     "validate_request는 NeMo Colang 액션 src/guardrails/nemo/actions.py의 validate_graph_rag_response가 호출한다. 다만 nemo/config.yml에는 rails.output만 정의되어 있고 rails.input이 없다. 이 평가셋은 검증기를 직접 호출하는 컴포넌트 단위 평가이며 rails를 통과한 통합 동작을 대표하지 않는다."
-  ]
+  ],
+  "builder_divergence": "다음 결정을 평가셋 파일에 직접 반영했고 scripts/evaluation/build_guardrail_eval_set.py에는 반영하지 않았다. 빌더로 재생성하면 되돌아간다: GB013 BLOCK, GC004 FALLBACK 유지, GC010 ALLOW 유지, GB002·GB014·GB015 BLOCK, GB003 WARN, GB018 양성 대조군 추가. coverage 항목은 빌더의 분기 레지스트리 기준이므로 PS-OFFICIAL-VERIFIED-USE가 반영되어 있지 않다. GG016 BLOCK도 추가로 반영했다."
 }
