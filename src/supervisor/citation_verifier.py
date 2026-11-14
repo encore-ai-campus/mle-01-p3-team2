@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 import unicodedata
 from collections.abc import Callable
@@ -77,6 +78,49 @@ def normalize_quote(text: str) -> str:
     return _WHITESPACE.sub(" ", normalized).strip().casefold()
 
 
+# 생성 모델이 원문을 옮겨 적으면서 조사·어미를 덧붙이는 경우가 있어
+# (예: 원문 "진전되면" → 인용 "진전이 되면") 완전 일치만 보면 정상 인용도
+# QUOTE_NOT_FOUND로 떨어진다. 아래 비율 이상 겹치면 같은 구절로 인정한다.
+QUOTE_MATCH_THRESHOLD = 0.9
+
+# 비율 판정은 원문이 인용을 담을 만큼 길 때만 의미가 있다.
+_MIN_FUZZY_QUOTE_LENGTH = 10
+
+
+def quote_match_ratio(citation_quote: str, source_text: str) -> float:
+    """인용 구절 중 원문에 순서대로 등장하는 문자 비율을 돌려줍니다."""
+
+    if not citation_quote:
+        return 0.0
+
+    matcher = difflib.SequenceMatcher(
+        None, source_text, citation_quote, autojunk=False
+    )
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return matched / len(citation_quote)
+
+
+def citable_text(evidence: Evidence) -> str:
+    """인용 대조에 쓸 근거 텍스트입니다.
+
+    프롬프트의 근거 블록은 원문과 함께 그래프 경로도 보여준다. 병명·품종처럼
+    청크 본문이 아니라 관계에만 있는 사실은 모델이 그래프 경로를 인용하는데,
+    원문만 대조하면 정상 인용이 QUOTE_NOT_FOUND로 떨어진다.
+    """
+
+    paths = evidence.graph_paths or (
+        [evidence.graph_path] if evidence.graph_path else []
+    )
+    rendered = [
+        "그래프 경로: " + " → ".join(str(node) for node in nodes)
+        for nodes in paths
+        if nodes
+    ]
+    if not rendered:
+        return evidence.quote
+    return evidence.quote + "\n\n" + "\n".join(rendered)
+
+
 def quote_exists(citation_quote: str, source_text: str) -> bool:
     """인용 구절이 실제 원문에 포함되는지 확인합니다."""
 
@@ -90,10 +134,19 @@ def quote_exists(citation_quote: str, source_text: str) -> bool:
     normalized_quote = normalize_quote(citation_quote)
     normalized_source = normalize_quote(source_text)
 
-    return bool(
-        normalized_quote
-        and normalized_quote in normalized_source
-    )
+    if not normalized_quote:
+        return False
+
+    if normalized_quote in normalized_source:
+        return True
+
+    # 조사·어미 수준의 사소한 차이는 허용하되, 없는 내용을 지어낸 인용은
+    # 겹치는 비율이 크게 떨어지므로 임계값으로 걸러진다.
+    if len(normalized_quote) < _MIN_FUZZY_QUOTE_LENGTH:
+        return False
+
+    ratio = quote_match_ratio(normalized_quote, normalized_source)
+    return ratio >= QUOTE_MATCH_THRESHOLD
 
 _SAFETY_KEYWORDS = (
     "농약",
@@ -183,7 +236,7 @@ def verify_citations(
             # 2단계: 인용 구절이 원문에 존재하는지 확인
             if not quote_exists(
                 citation.quote,
-                evidence.quote,
+                citable_text(evidence),
             ):
                 failures.append(
                     CitationFailure(
