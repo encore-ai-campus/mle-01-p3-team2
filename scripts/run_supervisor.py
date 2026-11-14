@@ -29,6 +29,7 @@ from src.retrievers.vector_retriever import (  # noqa: E402
     VectorIndex,
     vector_search,
 )
+from src.retrievers.router import JevQuestionRouter  # noqa: E402
 from src.supervisor.graph import build_supervisor  # noqa: E402
 from src.supervisor.answer_agent import AnswerAgent  # noqa: E402
 
@@ -99,6 +100,7 @@ def build_app():
         app = build_supervisor(
             graph_search_fn=run_graph_search,
             vector_search_fn=run_vector_search,
+            router=JevQuestionRouter.from_env(),
             evidence_lookup=lambda evidence_ids: neo4j_lookup(
                 driver,
                 evidence_ids,

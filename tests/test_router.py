@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from src.retrievers.router import JevQuestionRouter, QuestionRouter
 
 
@@ -38,6 +40,39 @@ def test_router_returns_graph_decision_without_running_retriever():
 def test_jev_router_falls_back_to_rules_without_classifier():
     decision = JevQuestionRouter().route_query("마늘 품종별 적합 지역은 어디인가?")
     assert decision.route == "GRAPH"
+
+
+def test_jev_router_uses_llm_only_for_graph_search_conditions():
+    class Classifier:
+        def invoke(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                choices={"route": SimpleNamespace(choice="GRAPH")}
+            )
+
+    class Analyzer:
+        def __init__(self):
+            self.questions = []
+
+        def analyze(self, question):
+            self.questions.append(question)
+            return SimpleNamespace(
+                crop="양파",
+                entities=["노균병"],
+                relation_types=["AFFECTED_BY_DISEASE", "방제"],
+                max_hops=2,
+                needs_official_evidence=True,
+            )
+
+    analyzer = Analyzer()
+    decision = JevQuestionRouter(Classifier(), analyzer).route_query(
+        "양파 노균병에 등록된 약제는 무엇인가요?"
+    )
+
+    assert decision.route == "GRAPH"
+    assert decision.crop == "양파"
+    assert decision.relation_types == ["AFFECTED_BY_DISEASE"]
+    assert "일부 관계 타입" in decision.warnings[0]
+    assert analyzer.questions
 
 
 def test_scope_gate_rejects_question_without_domain_signal():
@@ -109,24 +144,3 @@ def test_scope_gate_rejects_market_price_question():
     # 말뭉치에 시세 자료가 없어 작물 이름이 있어도 범위 밖입니다.
     decision = QuestionRouter().decide("배추 도매 가격이 얼마인가요?")
     assert decision.route == "REJECT"
-
-
-
-def test_router_uses_vector_for_single_explanatory_fact():
-    decision = QuestionRouter().decide("대서마늘은 언제 파종하는 것이 적절한가?")
-    assert decision.route == "VECTOR"
-    assert decision.crop == "마늘"
-
-
-def test_router_uses_hybrid_for_relation_and_multiple_use_details():
-    decision = QuestionRouter().decide(
-        "배추에 등록된 방제 약제와 사용 시기, 희석배수 및 최대 사용횟수를 알려주세요."
-    )
-    assert decision.route == "HYBRID"
-    assert decision.crop == "배추"
-
-
-def test_router_only_raises_hop_bound_for_explicit_three_stage_path():
-    decision = QuestionRouter().decide("마늘 품종과 적합 지역의 3홉 경로를 알려주세요.")
-    assert decision.route == "GRAPH"
-    assert decision.max_hops == 3

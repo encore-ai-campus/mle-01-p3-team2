@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Literal
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:  # pragma: no cover
+    BaseModel = None
+    Field = None
 
 try:
     from langchain_typesafe import Choice, TypeSafeClassifier
@@ -14,6 +21,14 @@ except ImportError:  # Optional until TYPESAFE_API_KEY is configured.
 
 Route = Literal["GRAPH", "VECTOR", "HYBRID", "REJECT"]
 
+VALID_RELATION_TYPES = frozenset({
+    "HAS_VARIETY", "SUITABLE_FOR_REGION",
+    "HAS_SOWING_OBSERVATION", "HAS_SOWING_RECOMMENDATION", "USES_VARIETY",
+    "HAS_ENVIRONMENT_REQUIREMENT", "HAS_ENVIRONMENT_OBSERVATION",
+    "HAS_GROWTH_OBSERVATION", "AFFECTED_BY_DISEASE", "AFFECTED_BY_INSECT",
+    "HAS_REGISTERED_PESTICIDE_USE", "CONTROLS_TARGET", "HAS_FERTILIZER_STANDARD",
+})
+
 
 @dataclass(frozen=True)
 class RouteDecision:
@@ -21,7 +36,54 @@ class RouteDecision:
     reason: str
     crop: str | None = None
     max_hops: int = 2
+    entities: list[str] = field(default_factory=list)
+    relation_types: list[str] = field(default_factory=list)
+    needs_official_evidence: bool = False
+    confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
+
+
+if BaseModel is not None:
+    class QueryAnalysis(BaseModel):
+        crop: str | None = None
+        entities: list[str] = Field(default_factory=list)
+        relation_types: list[str] = Field(default_factory=list)
+        max_hops: int = 2
+        needs_official_evidence: bool = False
+else:  # pragma: no cover
+    QueryAnalysis = None
+
+
+class LLMQueryAnalyzer:
+    """GRAPH/HYBRID 질문에 필요한 검색 조건만 구조화합니다."""
+
+    def __init__(self, model):
+        self.model = model
+
+    @classmethod
+    def from_env(cls):
+        import os
+
+        if not os.getenv("OPENAI_API_KEY") or QueryAnalysis is None:
+            return None
+        try:
+            from langchain_openai import ChatOpenAI
+
+            model = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0,
+            ).with_structured_output(QueryAnalysis)
+            return cls(model)
+        except Exception:
+            return None
+
+    def analyze(self, question: str) -> QueryAnalysis:
+        return self.model.invoke(
+            "질문에서 그래프 검색 조건만 추출하세요. "
+            "답변하거나 안전 판단하지 마세요. "
+            "작물, 품종·병해충·지역·환경 엔티티, 필요한 관계 타입, hop 수, "
+            "공식 근거 필요 여부를 구조화합니다.\n질문: " + question
+        )
 
 
 class QuestionRouter:
@@ -118,105 +180,30 @@ class QuestionRouter:
 
         normalized = re.sub(r"\s+", " ", question.strip())
         crop = next((crop for crop in self.CROPS if crop in normalized), None)
-        lowered = normalized.lower()
+        has_graph = any(term in normalized for term in self.GRAPH_TERMS)
+        has_vector = any(term in normalized for term in self.VECTOR_TERMS)
+        requires_official = any(term in normalized for term in self.OFFICIAL_NUMERIC_TERMS)
 
-        # Route from requested answer structure, not incidental vocabulary.
-        relation_cues = (
-            "품종별 적합 지역", "품종 중", "품종군은", "품종명에",
-            "저항성 품종군", "적합 지역", "적합한 지역", "어느 지역", "지역에서 재배",
-            "지역에 적합", "에서 재배하기에 적합한", "등록 약제", "등록된 약제",
-            "등록 농약", "등록된 농약", "등록된 방제 약제", "방제에 등록",
-            "방제용으로 등록", "등록되어 사용할", "방제할 때 등록", "방제용 품목",
-            "등록된", "파종한 작물", "파종한 상추", "파종된 작물", "실제로 파종된",
-            "재배된 작물", "사용된 품종", "그래프상", "연결된", "어떤 병에는",
-            "어떤 병은", "어떤 병해가", "병은 무엇", "어떤 병을 의심",
-            "무슨 병인가", "어떤 해충은", "해충은 무엇", "대상 해충",
-            "이어질 수 있는", "10a 기준 비료 표준사용량", "개별 농경지",
-        )
-        relation_intent = any(cue in lowered for cue in relation_cues)
-        if "파종된" in lowered and "품종" in lowered:
-            relation_intent = True
-        vector_override_cues = (
-            "재배 형태에 적합", "용도와 분류", "병 저항성은 어떻게",
-            "어떤 재배 적응성", "재배 적응성을 중점", "위험을 낮추려면",
-            "재배 규모에 따라", "표준 성분량", "표준사용량", "어떤 절차",
-            "어떤 재배 관리를",
-        )
-        if any(cue in lowered for cue in vector_override_cues):
-            relation_intent = False
-        if "10a 기준 비료 표준사용량" in lowered:
-            relation_intent = True
-        if all(cue in lowered for cue in ("개별 농경지", "표준 성분량", "함께 고려")):
-            relation_intent = True
-        explanation_cues = (
-            "이유", "문제가 생", "어떤 문제", "증상", "어떻게 관리", "관리해야",
-            "재배 방법", "절차", "성격", "의미", "특성", "특징", "참고할 때",
-            "어떻게 이해", "어떻게 예방", "줄이려면", "예방하려면", "피해를 주",
-        )
-        explanation_intent = any(cue in lowered for cue in explanation_cues)
-        detail_groups = (
-            ("사용적기", "사용 시기", "사용 가능 시기", "수확 전 사용 시기",
-             "적용 시기", "언제까지", "살포 시기", "발생 시기", "정식 전"),
-            ("사용횟수", "사용 횟수", "최대 사용 횟수", "몇 회", "횟수"),
-            ("희석배수", "희석 배수", "희석 및", "배수"),
-            ("사용 방법", "사용법", "간격으로", "어떻게 처리", "사용 조건", "어떤 조건"),
-            ("품목명", "품목은", "상표", "등록번호"),
-        )
-        detail_slots = sum(any(cue in lowered for cue in group) for group in detail_groups)
-        pesticide_relation = any(
-            cue in lowered for cue in (
-                "등록 약제", "등록된 약제", "등록 농약", "등록된 농약",
-                "등록된 방제 약제", "방제에 등록", "방제용으로 등록",
-                "등록되어 사용할", "방제할 때 등록", "방제용 품목", "등록된",
-                "사용할 수 있는 등록",
-            )
-        )
-        asks_source_check = any(
-            cue in lowered for cue in ("원문 근거", "출처 확인", "검증상태", "근거를 확인")
-        )
-        product_target_question = bool(
-            re.search(r"(?:분제|수화제|입제|유제).{0,20}(?:어떤 병해|어떤 병)", lowered)
-        )
-        hybrid_intent = relation_intent and (
-            ("개별 농경지" in lowered and "표준 성분량" in lowered and "함께 고려" in lowered)
-            or (pesticide_relation and detail_slots >= 2 and "검증상태" not in lowered)
-            or (pesticide_relation and detail_slots >= 1 and "사용 방법" in lowered and "발생" in lowered)
-            or product_target_question
-            or (asks_source_check and explanation_intent)
-            or (
-                explanation_intent
-                and any(joiner in lowered for joiner in ("하고", "그리고", "또한", "고 어떻게", "생기고"))
-            )
-        )
-
-        if "이 농약의" in lowered and any(cue in lowered for cue in ("희석", "배율", "사용량")):
-            return RouteDecision(
-                "GRAPH", "농약 사용 기록의 수치 속성을 조회합니다.", crop=crop,
-                warnings=["최종 답변 전 공식 근거 검증이 필요합니다."],
-            )
-
-        explicit_three_stage = any(
-            marker in lowered for marker in ("3-hop", "3 hop", "3홉", "세 단계 경로")
-        )
-        max_hops = 3 if explicit_three_stage and relation_intent else 2
-
-        if hybrid_intent:
-            return RouteDecision(
-                "HYBRID",
-                "관계 탐색과 복수의 근거·사용 세부사항을 함께 요청합니다.",
-                crop=crop, max_hops=max_hops,
-            )
-        if relation_intent:
+        if requires_official and not has_graph and not has_vector:
             return RouteDecision(
                 "GRAPH",
-                "질문이 엔티티 간 관계 또는 구조화된 속성 연결을 요구합니다.",
-                crop=crop, max_hops=max_hops,
+                "농약·비료 공식 근거를 그래프에서 먼저 확인합니다.",
+                crop=crop,
+                warnings=["최종 답변 전 공식 근거 검증이 필요합니다."],
             )
+        if has_graph and has_vector:
+            return RouteDecision("HYBRID", "관계 탐색과 원문 설명이 모두 필요합니다.", crop=crop)
+        if has_graph:
+            return RouteDecision("GRAPH", "품종·환경·병해충·지역 관계 검색이 적합합니다.", crop=crop)
+        if has_vector:
+            return RouteDecision("VECTOR", "설명·재배 방법 중심의 원문 검색이 적합합니다.", crop=crop)
         return RouteDecision(
-            "VECTOR",
-            "질문이 원인·증상·방법·설명 중심의 원문 정보를 요구합니다.",
-            crop=crop, max_hops=max_hops,
+            "HYBRID",
+            "질문 유형이 불명확해 그래프와 원문 검색을 함께 시도합니다.",
+            crop=crop,
+            warnings=["검색 결과를 확인한 뒤 최종 답변을 검증합니다."],
         )
+
     def route_query(self, question: str) -> RouteDecision:
         """검색을 실행하지 않고 검색 경로 판단 결과만 반환합니다."""
         return self.decide(question)
@@ -225,15 +212,23 @@ class QuestionRouter:
 class JevQuestionRouter(QuestionRouter):
     """JEV를 사용하고, 실패하면 규칙 기반 Router로 fallback합니다."""
 
-    def __init__(self, classifier=None):
+    def __init__(self, classifier=None, analyzer=None):
         self.classifier = classifier
+        self.analyzer = analyzer
 
     @classmethod
     def from_env(cls) -> "JevQuestionRouter":
         if TypeSafeClassifier is None:
             return cls()
         try:
-            return cls(TypeSafeClassifier())
+            classifier = TypeSafeClassifier(
+                model=os.getenv("TYPESAFE_MODEL", "jev-latest"),
+                base_url=os.getenv(
+                    "TYPESAFE_BASE_URL",
+                    "https://api.typesafe.ai",
+                ),
+            )
+            return cls(classifier, LLMQueryAnalyzer.from_env())
         except (TypeError, ValueError):
             return cls()
 
@@ -271,12 +266,30 @@ class JevQuestionRouter(QuestionRouter):
             if route not in {"GRAPH", "VECTOR", "HYBRID", "REJECT"}:
                 raise ValueError(f"Unexpected Jev route: {route!r}")
             fallback = super().route_query(question)
+            analysis = None
+            warnings = list(fallback.warnings)
+            if route in {"GRAPH", "HYBRID"} and self.analyzer is not None:
+                try:
+                    analysis = self.analyzer.analyze(question)
+                except Exception:
+                    warnings.append("그래프 검색 조건 LLM 분석에 실패했습니다.")
+            valid_relations = [
+                relation
+                for relation in (analysis.relation_types if analysis else [])
+                if relation in VALID_RELATION_TYPES
+            ]
+            if analysis and len(valid_relations) != len(analysis.relation_types):
+                warnings.append("LLM이 반환한 일부 관계 타입을 제외했습니다.")
             return RouteDecision(
                 route=route,
                 reason="Jev 구조화 라우팅 결과",
-                crop=fallback.crop,
-                max_hops=fallback.max_hops,
-                warnings=fallback.warnings,
+                crop=(analysis.crop if analysis and analysis.crop else fallback.crop),
+                max_hops=(analysis.max_hops if analysis else fallback.max_hops),
+                entities=(analysis.entities if analysis else []),
+                relation_types=valid_relations,
+                needs_official_evidence=(analysis.needs_official_evidence if analysis else False),
+                confidence=None,
+                warnings=warnings,
             )
         except Exception:
             fallback = super().route_query(question)

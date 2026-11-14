@@ -518,6 +518,7 @@ def hybrid_search(
     crop: str | None = None,
     max_hops: int = 2,
     relation_types: Sequence[str] | None = None,
+    entity_names: Sequence[str] | None = None,
     graph_limit: int = 10,
     vector_limit: int = 10,
     limit: int = 10,
@@ -568,6 +569,8 @@ def hybrid_search(
 
     if relation_types is not None:
         graph_kwargs["relation_types"] = relation_types
+    if entity_names is not None:
+        graph_kwargs["entity_names"] = entity_names
 
     graph_results = graph_search_fn(
         question,

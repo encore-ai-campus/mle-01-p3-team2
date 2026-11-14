@@ -20,13 +20,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from scripts.evaluation.evaluate_multihop import (
     DEFAULT_GOLDEN_PATH,
     expected_route_of,
     load_golden_cases,
 )
 from scripts.evaluation.report_io import write_summary
-from src.retrievers.router import QuestionRouter
+from src.retrievers.router import JevQuestionRouter
 from src.retrievers.search_result import SearchResult
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -98,7 +100,7 @@ def _open_neo4j_for_evaluation() -> Any:
 
 
 def collect_top10(
-    cases: list[dict], path: Path, router: QuestionRouter, graph: Any
+    cases: list[dict], path: Path, router: JevQuestionRouter, graph: Any
 ) -> None:
     """Run each non-REJECT case through its expected retrieval path."""
     from sentence_transformers import SentenceTransformer
@@ -127,11 +129,15 @@ def collect_top10(
                     results = graph.search(
                         question, crop=decision.crop,
                         max_hops=decision.max_hops, limit=10,
+                        relation_types=decision.relation_types or None,
+                        entity_names=decision.entities or None,
                     )
                 elif route == "HYBRID":
                     results = hybrid_search(
                         question, graph_retriever=graph, vector_index=vector,
                         crop=decision.crop, max_hops=decision.max_hops,
+                        relation_types=decision.relation_types or None,
+                        entity_names=decision.entities or None,
                         graph_limit=10, vector_limit=10, limit=10,
                     )
                 else:
@@ -575,6 +581,7 @@ def write_reports(
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--golden-set", type=Path, default=DEFAULT_GOLDEN_PATH)
     parser.add_argument("--top10", type=Path, default=REPORT_DIR / "top10_results.jsonl")
@@ -587,7 +594,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     cases = load_golden_cases(args.golden_set)
-    router = QuestionRouter()
+    router = JevQuestionRouter.from_env()
     graph = None
     if args.collect or args.check_neo4j:
         print(f"Python executable: {sys.executable}", flush=True)

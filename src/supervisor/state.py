@@ -19,6 +19,10 @@ class GraphState(TypedDict, total=False):
     route_reason: str
     crop: str | None
     max_hops: int
+    entities: list[str]
+    relation_types: list[str]
+    needs_official_evidence: bool
+    route_confidence: float | None
     # 답변 근거로 사용할 결과. verify에서 걸러진 뒤의 것
     results: list[SearchResult]
     # 검증 전 검색 원본. verify가 덮어쓰지 않음

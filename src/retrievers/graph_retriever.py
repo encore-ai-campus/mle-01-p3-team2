@@ -774,6 +774,7 @@ class GraphRetriever:
         limit: int = 20,
         relation_types: Sequence[str] | None = None,
         candidate_pool_size: int | None = None,
+        entity_names: Sequence[str] | None = None,
     ) -> list[GraphSearchResult]:
         """질문과 Router의 검색 조건을 사용합니다."""
 
@@ -788,6 +789,8 @@ class GraphRetriever:
         if candidate_pool_size is not None and candidate_pool_size < 1:
             raise ValueError("candidate_pool_size must be positive")
         candidate_limit = candidate_pool_size or min(max(limit * 3, 30), 300)
+        # Router 인터페이스를 유지합니다. 실제 엔티티 매칭은 질문 원문과
+        # 그래프의 이름·속성을 사용해 후보 선정 및 재정렬 단계에서 수행합니다.
         started = time.perf_counter()
         start_ids = self._crop_candidates(question, crop)
         self.last_search_diagnostics = {
@@ -876,6 +879,7 @@ def graph_search(
     limit: int = 20,
     relation_types: Sequence[str] | None = None,
     candidate_pool_size: int | None = None,
+    entity_names: Sequence[str] | None = None,
 ) -> list[SearchResult]:
     """Graph 검색 결과를 공통 SearchResult로 반환합니다."""
 
@@ -884,4 +888,6 @@ def graph_search(
         kwargs["candidate_pool_size"] = candidate_pool_size
     if relation_types is not None:
         kwargs["relation_types"] = relation_types
+    if entity_names is not None:
+        kwargs["entity_names"] = entity_names
     return retriever.search(question, **kwargs)
