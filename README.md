@@ -188,7 +188,7 @@ cp .env.example .env
 | `GUARDRAIL_JUDGE_MODEL` | | `gpt-4o-mini` | 출력 검증 LLM-as-Judge 모델 |
 | `LANGFUSE_PUBLIC_KEY` | ⬜ | — | trajectory 수집 시 필요 |
 | `LANGFUSE_SECRET_KEY` | ⬜ | — | trajectory 수집 시 필요 |
-| `LANGFUSE_HOST` | ⬜ | `https://cloud.langfuse.com` | 셀프호스팅 시 변경 |
+| `LANGFUSE_BASE_URL` | ⬜ | `https://cloud.langfuse.com` | 셀프호스팅 시 변경 |
 
 ✅ 필수 · ⬜ Langfuse trajectory 수집에만 필요
 
@@ -208,7 +208,7 @@ GUARDRAIL_JUDGE_MODEL=gpt-4o-mini
 
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_HOST=https://cloud.langfuse.com
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
 ```
 
 ### 4.4 인덱싱 (처음 한 번)

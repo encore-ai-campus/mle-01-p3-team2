@@ -39,7 +39,7 @@ MODEL_NAME = "BAAI/bge-m3"
 
 def load_config() -> dict[str, str]:
     """환경변수를 로드하고 필수 설정을 검증합니다."""
-    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / ".env", override=True)
 
     required = ("NEO4J_URI", "NEO4J_PASSWORD")
     missing = [key for key in required if not os.getenv(key)]
@@ -90,11 +90,23 @@ def build_app():
             )
 
         def run_vector_search(question: str, **kwargs: Any):
-            return vector_search(
-                question,
-                index=vector_retriever,
-                **kwargs,
-            )
+            try:
+                return vector_search(question, index=vector_retriever, **kwargs)
+            except ValueError as exc:
+                # The shared Neo4j instance may not contain this project's
+                # Chunk/1024-d vector index. Keep the Supervisor executable
+                # by using its existing graph retriever as a bounded fallback.
+                if not str(exc).startswith("Vector index not found:"):
+                    raise
+                return graph_search(
+                    question,
+                    retriever=graph_retriever,
+                    max_hops=kwargs.get("max_hops", 2),
+                    relation_types=kwargs.get("relation_types"),
+                    entity_names=kwargs.get("entity_names"),
+                    crop=kwargs.get("crop"),
+                    limit=kwargs.get("k", 10),
+                )
 
         answer_agent = AnswerAgent.from_env()
         app = build_supervisor(
