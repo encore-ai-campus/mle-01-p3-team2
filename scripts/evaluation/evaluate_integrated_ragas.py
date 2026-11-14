@@ -353,10 +353,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.resolve()
     golden_path = args.golden_set or root / "data/evaluation/golden_set_final.jsonl"
     chunk_path = args.chunks or root / "data/processed/chunks.jsonl"
-    output_dir = args.output_dir or root / "data/evaluation/integrated_ragas"
+    output_dir = args.output_dir or root / "data/evaluation/ragas_result_final"
     raw_path = output_dir / "supervisor_runs.jsonl"
-    scored_path = output_dir / "integrated_ragas_results.jsonl"
-    summary_path = output_dir / "integrated_ragas_summary.json"
+    scored_path = output_dir / "ragas_results.jsonl"
+    summary_path = output_dir / "ragas_summary.json"
 
     cases = [case for case in read_jsonl(golden_path) if case.get("status") == "READY"]
     if args.limit is not None:

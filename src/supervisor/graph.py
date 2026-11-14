@@ -518,6 +518,14 @@ def build_supervisor(
             )
             search_query = _build_retry_query(state)
 
+        elif citation_status == "FAIL":
+            retry_reason = (
+                "인용 검증에 실패해 "
+                "하이브리드 검색으로 재시도합니다."
+            )
+            # 실패한 주장이 없으면(NO_CLAIMS) 원래 질문으로 되돌아갑니다.
+            search_query = _build_retry_query(state)
+
         else:
             retry_reason = (
                 "검색 결과의 구조적 근거가 부족해 "
@@ -682,8 +690,10 @@ def build_supervisor(
         if status == "PASS":
             return "finalize"
 
+        # PARTIAL 과 FAIL 모두 한도 안에서는 HYBRID 로 승격해 다시 검색합니다.
+        # 근거를 더 받으면 인용이 붙을 수 있으므로 첫 실패로 보류하지 않습니다.
         if (
-            status == "PARTIAL"
+            status in {"PARTIAL", "FAIL"}
             and retry_count < retry_limit
         ):
             return "retry"

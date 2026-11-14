@@ -463,8 +463,49 @@ class GraphRetriever:
         self.database = database
         self.last_search_diagnostics: dict[str, Any] = {}
         self._crop_cache: list[tuple[str, str, str]] | None = None
+        self._pest_name_cache: tuple[str, ...] | None = None
         self._last_crop_match_count = 0
         self._last_crop_anchor_strategy = "uninitialized"
+
+    def _load_pest_names(self) -> tuple[str, ...]:
+        """그래프에 있는 해충·병해 이름을 한 번만 읽어 둡니다."""
+
+        options = {"database": self.database} if self.database != "neo4j" else {}
+        try:
+            with self.driver.session(**options) as session:
+                rows = list(
+                    session.run(
+                        "MATCH (n:Insect|Disease) RETURN n.name AS name",
+                        {},
+                    )
+                )
+        except Exception:
+            # 이름을 못 읽으면 분류어 검사만으로 판단하고 검색은 계속합니다.
+            return ()
+
+        names = set()
+        for row in rows:
+            name = row.get("name") if hasattr(row, "get") else None
+            normalized = re.sub(r"\s+", "", str(name or "")).lower()
+            if len(normalized) >= 2:
+                names.add(normalized)
+        return tuple(sorted(names, key=len, reverse=True))
+
+    def _mentions_pest_or_disease(self, question: str) -> bool:
+        """질문이 그래프에 있는 해충·병해를 가리키는지 봅니다.
+
+        병해충 이름을 코드에 적어 두면 새 이름이 들어올 때마다 조용히 빗나가므로
+        판정 근거를 그래프 데이터에 둡니다.
+        """
+
+        if self._pest_name_cache is None:
+            self._pest_name_cache = self._load_pest_names()
+
+        normalized_question = re.sub(r"\s+", "", question).lower()
+        return any(
+            name in normalized_question
+            for name in self._pest_name_cache
+        )
 
     def _crop_candidates(self, question: str, crop: str | None, limit: int = 8) -> list[str]:
         """Find crop anchors from names and serialized alias/attribute fields."""
@@ -814,9 +855,16 @@ class GraphRetriever:
                 or re.search(r"[가-힣A-Za-z0-9]+종", question) is not None
             )
         )
+        # "병해·해충" 같은 분류어를 쓰지 않고 실제 병해충 이름만 적은 질문
+        # (예: "배추 파밤나방 방제 약제")도 약제 질문으로 봐야 합니다. 이름 목록은
+        # 그래프에서 읽으므로 새 병해충이 들어와도 코드를 고치지 않아도 됩니다.
         pesticide_target = (
             ("방제" in question or "농약" in question or "약제" in question)
-            and ("병해" in question or "해충" in question or "노균병" in question)
+            and (
+                "병해" in question
+                or "해충" in question
+                or self._mentions_pest_or_disease(question)
+            )
         )
         explicit_multihop = "2홉" in question or "멀티홉" in question
         if max_hops >= 2 and (explicit_multihop or variety_region or pesticide_target):

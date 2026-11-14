@@ -368,3 +368,86 @@ def test_supervisor_withholds_graph_path_with_ids_but_no_original_text():
     assert state["evidence_status"] == "INSUFFICIENT"
     assert state["final_status"] == "WITHHELD"
     assert state["results"] == []
+
+
+def _no_claims_answer_generator(question, evidences):
+    """인용할 구절을 못 찾아 주장을 비워 돌려주는 생성기입니다."""
+
+    del question, evidences
+
+    return CitedAnswer(answer="확인된 주장이 없습니다.", claims=[])
+
+
+def test_supervisor_retries_with_hybrid_when_citation_verification_fails():
+    """NO_CLAIMS 로 인용 검증이 실패하면 보류 전에 HYBRID 로 재검색합니다."""
+
+    calls = []
+    answers = [_no_claims_answer_generator, _cited_answer_generator]
+
+    def generator(question, evidences):
+        current = answers[min(len(calls) - 1, len(answers) - 1)]
+        return current(question, evidences)
+
+    def graph_search_fn(question, **kwargs):
+        calls.append(("graph", question))
+        return [_graph_result()]
+
+    def hybrid_search_fn(question, **kwargs):
+        calls.append(("hybrid", question))
+        return [_graph_result()]
+
+    app = build_supervisor(
+        evidence_lookup=_evidence_lookup,
+        cited_answer_generator=generator,
+        citation_support_checker=_support_checker,
+        graph_search_fn=graph_search_fn,
+        vector_search_fn=lambda question, **kwargs: [],
+        hybrid_search_fn=hybrid_search_fn,
+        max_retries=1,
+    )
+
+    state = app.invoke(
+        {"question": "마늘 품종별 적합 지역은 어디인가?"}
+    )
+
+    # 첫 시도는 GRAPH, 재시도는 HYBRID 로 올라가야 합니다.
+    assert [source for source, _ in calls] == ["graph", "hybrid"]
+    assert state["retry_count"] == 1
+    assert state["route_path"] == ["GRAPH", "HYBRID"]
+    assert state["citation_status"] == "PASS"
+    assert state["final_status"] == "ANSWERED"
+
+
+def test_supervisor_withholds_when_citation_keeps_failing_after_retry():
+    """재시도해도 인용 검증이 실패하면 사유를 남기고 보류합니다."""
+
+    routes = []
+
+    def graph_search_fn(question, **kwargs):
+        routes.append("graph")
+        return [_graph_result()]
+
+    def hybrid_search_fn(question, **kwargs):
+        routes.append("hybrid")
+        return [_graph_result()]
+
+    app = build_supervisor(
+        evidence_lookup=_evidence_lookup,
+        cited_answer_generator=_no_claims_answer_generator,
+        citation_support_checker=_support_checker,
+        graph_search_fn=graph_search_fn,
+        vector_search_fn=lambda question, **kwargs: [],
+        hybrid_search_fn=hybrid_search_fn,
+        max_retries=1,
+    )
+
+    state = app.invoke(
+        {"question": "마늘 품종별 적합 지역은 어디인가?"}
+    )
+
+    # 재시도는 한도만큼만 하고, 무한 재검색으로 가지 않아야 합니다.
+    assert routes == ["graph", "hybrid"]
+    assert state["retry_count"] == 1
+    assert state["citation_status"] == "FAIL"
+    assert state["final_status"] == "WITHHELD"
+    assert "NO_CLAIMS" in state["withhold_reason"]

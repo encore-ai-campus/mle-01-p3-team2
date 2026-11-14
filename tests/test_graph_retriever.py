@@ -137,11 +137,12 @@ class FakeResult:
 
 
 class FakeSession:
-    def __init__(self, rows=(), chunk_rows=()):
+    def __init__(self, rows=(), chunk_rows=(), pest_rows=()):
         self.query = None
         self.params = None
         self.rows = rows
         self.chunk_rows = chunk_rows
+        self.pest_rows = pest_rows
         self.calls = []
 
     def __enter__(self):
@@ -159,14 +160,16 @@ class FakeSession:
                               if crop else [])
         if query.startswith("MATCH (chunk:Chunk)"):
             return FakeResult(self.chunk_rows)
+        if query.startswith("MATCH (n:Insect|Disease)"):
+            return FakeResult(self.pest_rows)
         self.query = query
         self.params = params
         return FakeResult(self.rows)
 
 
 class FakeDriver:
-    def __init__(self, rows=(), chunk_rows=()):
-        self.session_instance = FakeSession(rows, chunk_rows)
+    def __init__(self, rows=(), chunk_rows=(), pest_rows=()):
+        self.session_instance = FakeSession(rows, chunk_rows, pest_rows)
 
     def session(self):
         return self.session_instance
@@ -464,3 +467,58 @@ def test_variety_group_region_question_uses_two_hop_search():
     assert "*2..2" in query
     assert ":`HAS_VARIETY`|`SUITABLE_FOR_REGION`" in query
     assert "양파" in params["terms"]
+
+
+def test_named_pest_question_prioritizes_pesticide_relations():
+    """분류어("해충") 없이 해충 이름만 적은 질문도 약제 2-hop 경로를 먼저 찾습니다."""
+
+    driver = FakeDriver(pest_rows=[{"name": "파밤나방"}, {"name": "노균병"}])
+    retriever = GraphRetriever(driver)
+
+    retriever.search(
+        "배추에서 파밤나방을 방제하려면 어떤 등록 약제를 사용하나요?",
+        crop="배추", max_hops=2, limit=10,
+    )
+
+    query, _ = next(
+        (q, p) for q, p in driver.session_instance.calls if "MATCH path =" in q
+    )
+    assert "*2..2" in query
+    assert ":`HAS_REGISTERED_PESTICIDE_USE`|`CONTROLS_TARGET`" in query
+
+
+def test_pesticide_question_without_known_pest_name_stays_generic():
+    """그래프에 없는 대상이면 약제 관계를 강제하지 않고 일반 검색으로 갑니다."""
+
+    driver = FakeDriver(pest_rows=[{"name": "파밤나방"}])
+    retriever = GraphRetriever(driver)
+
+    retriever.search(
+        "배추에 쓸 수 있는 약제를 알려주세요",
+        crop="배추", max_hops=2, limit=10,
+    )
+
+    query, _ = next(
+        (q, p) for q, p in driver.session_instance.calls if "MATCH path =" in q
+    )
+    assert "*1..2" in query
+    assert "HAS_REGISTERED_PESTICIDE_USE" not in query
+
+
+def test_pest_names_are_read_from_the_graph_only_once():
+    """이름 목록은 검색마다 다시 읽지 않습니다."""
+
+    driver = FakeDriver(pest_rows=[{"name": "파밤나방"}])
+    retriever = GraphRetriever(driver)
+
+    for _ in range(3):
+        retriever.search(
+            "배추 파밤나방 방제 약제", crop="배추", max_hops=2, limit=10,
+        )
+
+    pest_lookups = [
+        query
+        for query, _ in driver.session_instance.calls
+        if query.startswith("MATCH (n:Insect|Disease)")
+    ]
+    assert len(pest_lookups) == 1
