@@ -88,6 +88,9 @@ class VectorIndex:
             "RETURN node.chunk_id AS chunk_id, "
             "node.source_id AS source_id, "
             "node.evidence_id AS evidence_id, "
+            "node.document_id AS document_id, "
+            "node.title AS title, "
+            "node.source_url AS url, "
             "node.raw_text AS text, "
             "node.embedding_model AS embedding_model, "
             "node.embedding_dimension AS embedding_dimension, "
@@ -155,7 +158,36 @@ class VectorIndex:
             embedding=query_vector,
             database_=self.database,
         )
-        return [vector_record_to_result(record) for record in records]
+        results: list[SearchResult] = []
+        for record in records:
+            score = record.get("score")
+            if score is None or not math.isfinite(float(score)):
+                raise ValueError("Neo4j returned a non-finite vector score")
+            chunk_id = record.get("chunk_id")
+            source_id = record.get("source_id")
+            evidence_id = record.get("evidence_id")
+            raw_text = record.get("text")
+            results.append(
+                SearchResult(
+                    source="vector",
+                    text=raw_text if isinstance(raw_text, str) else "",
+                    score=float(score),
+                    evidence_ids=[str(evidence_id)] if evidence_id else [],
+                    source_ids=[str(source_id)] if source_id else [],
+                    chunk_ids=[str(chunk_id)] if chunk_id else [],
+                    path=None,
+                    relation_types=None,
+                    metadata={
+                        "embedding_model": record.get("embedding_model"),
+                        "embedding_dimension": record.get("embedding_dimension"),
+                        "source_official": record.get("source_official"),
+                        'document_id': record.get('document_id'),
+                        'title': record.get('title'),
+                        'url': record.get('url'),
+                    },
+                )
+            )
+        return results
 
     def search(self, question: str, *, k: int = 5) -> list[SearchResult]:
         """Embed a question and retrieve its nearest Chunk nodes from Neo4j."""

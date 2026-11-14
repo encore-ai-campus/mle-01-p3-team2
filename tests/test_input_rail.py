@@ -45,6 +45,7 @@ def test_dangerous_input_stops_before_retrieval():
     app = build_supervisor(
         graph_search_fn=graph_search,
         vector_search_fn=vector_search,
+        evidence_lookup=lambda evidence_ids: {},
     )
 
     state = app.invoke({
@@ -74,6 +75,7 @@ def test_exposure_input_returns_emergency_message():
     app = build_supervisor(
         graph_search_fn=graph_search,
         vector_search_fn=vector_search,
+        evidence_lookup=lambda evidence_ids: {},
     )
 
     state = app.invoke({

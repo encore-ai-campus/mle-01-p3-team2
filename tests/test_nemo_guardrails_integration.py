@@ -27,7 +27,11 @@ def test_nemo_config_and_colang_parse():
     config = load_config()
 
     assert config.colang_version == "1.0"
-    assert len(config.flows) == 1
+    assert len(config.flows) == 2
+    assert {flow["id"] for flow in config.flows} == {
+        "agriculture help",
+        "protect internal instructions",
+    }
 
 
 @pytest.mark.asyncio

@@ -81,6 +81,7 @@ def test_supervisor_stops_dangerous_request():
     app = build_supervisor(
         graph_search_fn=graph_search,
         vector_search_fn=vector_search,
+        evidence_lookup=lambda evidence_ids: {},
     )
 
     state = app.invoke({
@@ -107,6 +108,7 @@ def test_supervisor_emergency_stops_retrieval():
     app = build_supervisor(
         graph_search_fn=graph_search,
         vector_search_fn=vector_search,
+        evidence_lookup=lambda evidence_ids: {},
     )
 
     state = app.invoke({

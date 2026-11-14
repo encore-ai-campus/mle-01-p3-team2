@@ -1,4 +1,4 @@
-"""검색·검증 흐름을 조정하는 LangGraph Supervisor입니다."""
+"""검색·답변 생성·인용 검증 흐름을 조정하는 LangGraph Supervisor입니다."""
 
 from __future__ import annotations
 
@@ -7,66 +7,226 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from src.retrievers.answer import (
+    CitedAnswer,
+    Evidence,
+    build_evidence,
+    render_cited_answer,
+)
 from src.retrievers.hybrid_retriever import hybrid_search
 from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
 
 from .answer_agent import AnswerAgent
+from .citation_verifier import SupportChecker, verify_citations
 from .state import GraphState
-from src.guardrails.supervisor_adapter import guardrails_node
-from src.guardrails.input_rail import input_safety_node, after_input_safety
-from src.guardrails.supervisor_adapter import guardrails_node
-from src.guardrails.dialog_rail import dialog_node, after_dialog
+
+# Guardrails 연동
+from src.guardrails.input_rail import (
+    input_safety_node,
+    after_input_safety,
+)
+from src.guardrails.dialog_rail import (
+    dialog_node,
+    after_dialog,
+)
 from src.guardrails.retrieval_rail import filter_retrieval_results
-from src.guardrails.execution_adapter import execution_node, after_execution
-from src.guardrails.neo4j_pesticide_lookup import make_neo4j_pesticide_lookup
+from src.guardrails.execution_adapter import (
+    execution_node,
+    after_execution,
+)
+from src.guardrails.supervisor_adapter import guardrails_node
+from src.guardrails.neo4j_pesticide_lookup import (
+    make_neo4j_pesticide_lookup,
+)
 
 GraphSearch = Callable[..., list[SearchResult]]
 VectorSearch = Callable[..., list[SearchResult]]
-AnswerGenerator = Callable[[str, list[SearchResult]], str]
+
+EvidenceLookup = Callable[
+    [list[str]],
+    dict[str, dict],
+]
+
+CitedAnswerGenerator = Callable[
+    [str, list[Evidence]],
+    CitedAnswer,
+]
 
 
-def _default_answer(question: str, results: list[SearchResult]) -> str:
-    """LLM 연결 전에도 검색 경로를 확인할 수 있는 임시 답변을 만듭니다."""
-    del question
-    return "\n".join(result.text for result in results)
-
-INSUFFICIENT_EVIDENCE_WARNING = "답변에 사용할 공식 근거가 부족합니다."
+INSUFFICIENT_EVIDENCE_WARNING = (
+    "답변에 사용할 공식 근거가 부족합니다."
+)
 
 
-def _append_warning(existing: list[str], message: str) -> list[str]:
-    """같은 경고를 재시도마다 반복해서 쌓지 않습니다."""
-    return existing if message in existing else [*existing, message]
+def _append_warning(
+    existing: list[str],
+    message: str,
+) -> list[str]:
+    """같은 경고를 중복해서 쌓지 않습니다."""
 
-def _has_usable_evidence(result: SearchResult) -> bool:
-    """검색 결과가 답변 근거로 사용할 수 있는지 확인합니다."""
+    if message in existing:
+        return existing
+
+    return [*existing, message]
+
+def _has_usable_evidence(
+    result: SearchResult,
+) -> bool:
+    """공통 Evidence로 변환할 수 있는 검색 결과인지 확인합니다."""
+
     if result.metadata.get("retrieval_eligible") is False:
         return False
-    return bool(result.evidence_ids or result.source_ids or result.chunk_ids)
+
+    # build_evidence()는 evidence_ids를 기준으로 원문을 조회합니다.
+    if not result.evidence_ids:
+        return False
+
+    if result.source == "graph":
+        edges = result.path_edges or []
+
+        if (
+            result.metadata.get("has_complete_evidence") is not True
+            or not edges
+        ):
+            return False
+
+        if not all(
+            edge.get("original_chunks")
+            and all(
+                chunk.get("text", "").strip()
+                for chunk in edge["original_chunks"]
+            )
+            for edge in edges
+        ):
+            return False
+
+    return True
+
+
+def _failed_claim_texts(
+    state: GraphState,
+) -> list[str]:
+    """인용 검증에 실패한 주장 텍스트를 반환합니다."""
+
+    cited_answer = state.get("cited_answer")
+
+    if cited_answer is None:
+        return []
+
+    failure_indexes = {
+        failure.get("claim_index")
+        for failure in state.get("citation_failures", [])
+        if isinstance(failure.get("claim_index"), int)
+        and failure.get("claim_index", -1) >= 0
+    }
+
+    return [
+        claim.text
+        for index, claim in enumerate(cited_answer.claims)
+        if index in failure_indexes
+    ]
+
+
+def _build_retry_query(
+    state: GraphState,
+) -> str:
+    """원래 질문에 검증 실패 주장을 추가합니다."""
+
+    # search_query를 재사용하면 재시도 문구가 중복될 수 있으므로
+    # 항상 원래 사용자 질문에서 시작합니다.
+    question = state.get("question", "")
+    failed_claims = _failed_claim_texts(state)
+
+    if not failed_claims:
+        return question
+
+    claim_block = "\n".join(
+        f"- {claim}"
+        for claim in failed_claims
+    )
+
+    return (
+        f"{question}\n\n"
+        "다음 사실을 확인할 수 있는 공식 근거를 우선 검색:\n"
+        f"{claim_block}"
+    )
+
+
+def _build_withhold_reason(
+    state: GraphState,
+) -> str:
+    """충돌·인용 실패·원문 조회 실패를 보류 사유로 정리합니다."""
+
+    parts: list[str] = []
+
+    for conflict in state.get("citation_conflicts", []):
+        evidence_ids = ", ".join(
+            conflict.get("evidence_ids", [])
+        )
+        reason = conflict.get(
+            "reason",
+            "근거 사이에 충돌이 있습니다.",
+        )
+
+        parts.append(
+            f"CONFLICT [{evidence_ids}]: {reason}"
+        )
+
+    for failure in state.get("citation_failures", []):
+        code = failure.get("code", "UNKNOWN")
+        reason = failure.get(
+            "reason",
+            "인용 검증에 실패했습니다.",
+        )
+
+        parts.append(f"{code}: {reason}")
+
+    for dropped in state.get("dropped_evidences", []):
+        evidence_id = dropped.get("evidence_id", "")
+        reason = dropped.get("reason", "UNKNOWN")
+
+        parts.append(
+            f"{reason} [{evidence_id}]"
+        )
+
+    if not parts:
+        return "충분한 공식 근거를 확인하지 못했습니다."
+
+    # 중복 사유를 제거하면서 기존 순서는 유지합니다.
+    return "; ".join(dict.fromkeys(parts))
 
 
 def build_supervisor(
     *,
     graph_search_fn: GraphSearch,
     vector_search_fn: VectorSearch,
+    evidence_lookup: EvidenceLookup,
+    guardrails_fn=None,
+    hybrid_search_fn: Callable[
+        ...,
+        list[SearchResult],
+    ] | None = None,
+    router: QuestionRouter | None = None,
+    cited_answer_generator: CitedAnswerGenerator | None = None,
+    citation_support_checker: SupportChecker | None = None,
     pesticide_lookup_fn=None,
     current_verifier_fn=None,
-    hybrid_search_fn: Callable[..., list[SearchResult]] | None = None,
-    router: QuestionRouter | None = None,
-    answer_generator: AnswerGenerator | None = None,
     max_retries: int = 1,
     result_limit: int = 10,
 ):
-    """검색 Worker와 검증 흐름을 연결한 실행 가능한 LangGraph를 만듭니다.
 
-    Router는 경로만 결정하고, 실제 검색 함수 호출은 Supervisor 노드가
-    담당합니다. ``answer_generator``를 주입하지 않으면 검색 결과를
-    줄바꿈으로 보여주는 검사용 기본 답변을 사용합니다.
-    """
+    """검색부터 인용 검증과 최종 출력까지 연결합니다."""
+
     if max_retries < 0:
-        raise ValueError("max_retries는 0 이상이어야 합니다.")
+        raise ValueError(
+            "max_retries는 0 이상이어야 합니다."
+        )
+
     if result_limit < 1:
-        raise ValueError("result_limit은 양수여야 합니다.")
+        raise ValueError(
+            "result_limit은 양수여야 합니다."
+        )
 
     selected_router = router or QuestionRouter()
     selected_pesticide_lookup = (
@@ -76,36 +236,83 @@ def build_supervisor(
     )
     selected_hybrid = hybrid_search_fn or hybrid_search
     selected_answer_agent = AnswerAgent.from_env()
-    generate_answer = answer_generator or selected_answer_agent.generate
 
-    def route_node(state: GraphState) -> dict[str, Any]:
-        decision = selected_router.route_query(state.get("question", ""))
+    generate_cited_answer = (
+        cited_answer_generator
+        or selected_answer_agent.generate_cited
+    )
+
+    def route_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """최초 검색 경로를 결정합니다."""
+
+        question = state.get("question", "")
+        decision = selected_router.route_query(question)
+
         return {
             "route": decision.route,
-            # 최초 판단은 fallback이 덮어쓰지 않도록 따로 보존합니다.
             "initial_route": decision.route,
             "route_path": [decision.route],
             "route_reason": decision.reason,
+            "initial_route_reason": decision.reason,
             "crop": decision.crop,
             "max_hops": decision.max_hops,
+            "entities": list(decision.entities),
+            "relation_types": list(decision.relation_types),
+            "needs_official_evidence": decision.needs_official_evidence,
+            "route_confidence": decision.confidence,
             "warnings": list(decision.warnings),
-            "retry_count": state.get("retry_count", 0),
-            "max_retries": state.get("max_retries", max_retries),
-            'route_reason': decision.reason,
-            'initial_route_reason': decision.reason,
+
+            # 최초 검색은 사용자 질문 그대로 실행
+            "search_query": question,
+
+            "retry_count": state.get(
+                "retry_count",
+                0,
+            ),
+            "max_retries": state.get(
+                "max_retries",
+                max_retries,
+            ),
+
+            "citation_status": "",
+            "citation_failures": [],
+            "citation_conflicts": [],
+            "dropped_evidences": [],
         }
 
-    def retrieve_node(state: GraphState) -> dict[str, Any]:
+    def retrieve_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """선택된 경로로 검색합니다."""
+
         route = state.get("route", "REJECT")
-        question = state.get("question", "")
+        question = (
+            state.get("search_query")
+            or state.get("question", "")
+        )
         crop = state.get("crop")
         max_hops = state.get("max_hops", 2)
+        relation_types = state.get("relation_types") or None
+        entity_names = state.get("entities") or None
+
         if route == "GRAPH":
             results = graph_search_fn(
-                question, crop=crop, max_hops=max_hops, limit=result_limit
+                question,
+                crop=crop,
+                max_hops=max_hops,
+                relation_types=relation_types,
+                entity_names=entity_names,
+                limit=result_limit,
             )
+
         elif route == "VECTOR":
-            results = vector_search_fn(question, k=result_limit)
+            results = vector_search_fn(
+                question,
+                k=result_limit,
+            )
+
         elif route == "HYBRID":
             results = selected_hybrid(
                 question,
@@ -113,22 +320,47 @@ def build_supervisor(
                 vector_search_fn=vector_search_fn,
                 crop=crop,
                 max_hops=max_hops,
+                relation_types=relation_types,
+                entity_names=entity_names,
                 limit=result_limit,
             )
+
         else:
             results = []
-        return {"results": results,
-                # 재시도가 일어나도 이전 시도의 검색 결과르 잃지 않도록 누적
-                "retrieved_results": [*state.get('retrieved_results', []), *results],
-                'attemps': [*state.get('attemps', []), {'route': route, 'max_hops': max_hops, 'limit': result_limit, 'found': len(results)}],
-                }
+
+        attempts = [
+            *state.get("attemps", []),
+            {
+                "route": route,
+                "query": question,
+                "max_hops": max_hops,
+                "limit": result_limit,
+                "found": len(results),
+            },
+        ]
+
+        return {
+            "results": results,
+
+            # 평가용 검색 원본은 재시도 후에도 누적합니다.
+            "retrieved_results": [
+                *state.get("retrieved_results", []),
+                *results,
+            ],
+
+            # 기존 필드명과의 호환을 위해 attemps를 유지합니다.
+            "attemps": attempts,
+        }
 
 
-    def verify_node(state: GraphState) -> dict[str, Any]:
-        """검색 근거 검증 및 평가용 원본 보존."""
+    def verify_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """Retrieval Rail과 검색 근거 유효성을 검증합니다."""
 
         results = state.get("results", [])
 
+        # 1. Guardrails: 검색 결과 안전성 검사
         checked = filter_retrieval_results(
             results,
             pesticide_use_requested=(
@@ -136,18 +368,27 @@ def build_supervisor(
             ),
         )
 
+        # 2. 안전성 검사 통과 결과만 Evidence 검증
         usable = [
             result
             for result in checked.accepted
             if _has_usable_evidence(result)
         ]
 
+        # 3. Guardrails 또는 Evidence 검사에서 탈락한 결과
         rejected = [
             result
             for result in results
             if not any(result is item for item in usable)
         ]
 
+        # 4. 재검색 이전의 탈락 결과도 유지
+        accumulated_rejected = [
+            *state.get("rejected_results", []),
+            *rejected,
+        ]
+
+        # 5. 기존 경고와 Guardrails 경고 통합
         warnings = list(dict.fromkeys([
             *state.get("warnings", []),
             *checked.warnings,
@@ -161,10 +402,7 @@ def build_supervisor(
 
         return {
             "results": usable,
-            "rejected_results": [
-                *state.get("rejected_results", []),
-                *rejected,
-            ],
+            "rejected_results": accumulated_rejected,
             "retrieval_rejections": checked.rejected,
             "evidence_status": (
                 "PASS" if usable else "INSUFFICIENT"
@@ -173,135 +411,386 @@ def build_supervisor(
         }
 
 
-        # 2. 기존 Supervisor 근거 검사 유지
-        usable = [
-            result
-            for result in checked.accepted
-            if _has_usable_evidence(result)
-        ]
+    def prepare_evidence_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """SearchResult를 공통 Evidence 형식으로 변환합니다."""
 
-        # 3. 기존 경고와 신규 경고 병합
-        warnings = list(
-            dict.fromkeys([
-                *state.get("warnings", []),
-                *checked.warnings,
-            ])
-        )
-
-        if usable:
-            return {
-                "results": usable,
-                "evidence_status": "PASS",
-                "warnings": warnings,
-                "retrieval_rejections": checked.rejected,
-            }
-
-        # 4. 근거가 모두 제외되면 기존 재검색 흐름 사용
-        return {
-            "results": [],
-            "evidence_status": "INSUFFICIENT",
-            "warnings": list(dict.fromkeys([
-                *warnings,
-                "답변에 사용할 검증 가능한 근거가 부족합니다.",
-            ])),
-            "retrieval_rejections": checked.rejected,
-            'rejected_results': [r for r in results if not _has_usable_evidence(r)],
-            "warnings": _append_warning(state.get("warnings", []), INSUFFICIENT_EVIDENCE_WARNING),
-        }
-
-
-
-
-
-    def answer_node(state: GraphState) -> dict[str, Any]:
-        """검색 근거가 충분할 때 답변 초안만 생성합니다."""
-
-        if state.get("evidence_status") != "PASS":
-            return {
-                "answer": "",
-            }
-
-        answer = generate_answer(
-            state.get("question", ""),
+        evidences, dropped = build_evidence(
             state.get("results", []),
+            evidence_lookup,
         )
 
-        # 최종 답변은 Guardrails 검증 후 결정
+        if not evidences:
+            return {
+                "evidences": [],
+                "dropped_evidences": dropped,
+                "evidence_status": "INSUFFICIENT",
+                "warnings": _append_warning(
+                    state.get("warnings", []),
+                    INSUFFICIENT_EVIDENCE_WARNING,
+                ),
+            }
+
         return {
-            "answer": answer,
+            "evidences": evidences,
+            "dropped_evidences": dropped,
+            "evidence_status": "PASS",
         }
 
+    def answer_cited_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """Evidence를 이용해 구조화된 인용 답변을 생성합니다."""
 
-    def reject_node(state: GraphState) -> dict[str, Any]:
-        """범위 밖 질문을 검색 없이 거절"""
-        reason = state.get("route_reason") or "질문이 이 서비스의 범위를 벗어났습니다."
+        evidences = state.get("evidences", [])
+
+        if not evidences:
+            return {
+                "cited_answer": None,
+                "answer": "",
+                "citation_status": "FAIL",
+                "citation_failures": [
+                    {
+                        "code": "NO_CLAIMS",
+                        "claim_index": -1,
+                        "citation_index": None,
+                        "evidence_id": None,
+                        "reason": (
+                            "인용 가능한 근거가 없습니다."
+                        ),
+                    }
+                ],
+                "citation_conflicts": [],
+            }
+
+        cited_answer = generate_cited_answer(
+            state.get("question", ""),
+            evidences,
+        )
+
         return {
-            "results": [],
-            # 검증을 수행하지 않았다는 의미
-            # INSUFFICIENT (검색은 했지만 근거가 부족함)와 구별해야 함
-            "evidence_status": "NOT_APPLICABLE",
-            "final_status": "REJECTED",
-            "final_answer": (
-                f"{reason} 농업 재배·병해충·농약·비료 관련 질문을 입력해 주세요."
+            "cited_answer": cited_answer,
+            "answer": cited_answer.answer,
+
+            # 검증 노드가 새 값을 설정하도록 초기화
+            "citation_status": "",
+            "citation_failures": [],
+            "citation_conflicts": [],
+        }
+
+    def verify_citations_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """구조화 답변의 ID·인용문·주장 지원 여부를 검사합니다."""
+
+        cited_answer = state.get("cited_answer")
+        evidences = state.get("evidences", [])
+
+        if cited_answer is None:
+            return {
+                "citation_status": "FAIL",
+                "citation_failures": [
+                    {
+                        "code": "NO_CLAIMS",
+                        "claim_index": -1,
+                        "citation_index": None,
+                        "evidence_id": None,
+                        "reason": (
+                            "구조화 답변이 생성되지 않았습니다."
+                        ),
+                    }
+                ],
+                "citation_conflicts": [],
+                "checked_claims": 0,
+                "supported_claims": 0,
+            }
+
+        if citation_support_checker is None:
+            return {
+                "citation_status": "FAIL",
+                "citation_failures": [
+                    {
+                        "code": "NOT_SUPPORTED",
+                        "claim_index": -1,
+                        "citation_index": None,
+                        "evidence_id": None,
+                        "reason": (
+                            "주장 지원 여부 판정기가 "
+                            "연결되지 않았습니다."
+                        ),
+                    }
+                ],
+                "citation_conflicts": [],
+                "checked_claims": len(
+                    cited_answer.claims
+                ),
+                "supported_claims": 0,
+            }
+
+        result = verify_citations(
+            answer=cited_answer,
+            evidences=evidences,
+            support_checker=citation_support_checker,
+        )
+
+        return {
+            "citation_status": result.status,
+            "citation_failures": [
+                failure.model_dump()
+                for failure in result.failures
+            ],
+            "citation_conflicts": [
+                conflict.model_dump()
+                for conflict in result.conflicts
+            ],
+            "checked_claims": result.checked_claims,
+            "supported_claims": result.supported_claims,
+        }
+
+    def retry_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """구조 근거 또는 인용 근거 부족 시 HYBRID로 재검색합니다."""
+
+        path = state.get("route_path", [])
+        citation_status = state.get("citation_status")
+
+        if citation_status == "PARTIAL":
+            retry_reason = (
+                "일부 주장에 대한 인용 근거가 부족해 "
+                "하이브리드 검색으로 재시도합니다."
             )
-        }
+            search_query = _build_retry_query(state)
 
-    def reject_node(state: GraphState) -> dict[str, Any]:
-        """범위 밖 질문을 검색 없이 거절"""
-        reason = state.get("route_reason") or "질문이 이 서비스의 범위를 벗어났습니다."
-        return {
-            "results": [],
-            # 검증을 수행하지 않았다는 의미
-            # INSUFFICIENT (검색은 했지만 근거가 부족함)와 구별해야 함
-            "evidence_status": "NOT_APPLICABLE",
-            "final_status": "REJECTED",
-            "final_answer": (
-                f"{reason} 농업 재배·병해충·농약·비료 관련 질문을 입력해 주세요."
+        elif citation_status == "FAIL":
+            retry_reason = (
+                "인용 검증에 실패해 "
+                "하이브리드 검색으로 재시도합니다."
             )
-        }
+            # 실패한 주장이 없으면(NO_CLAIMS) 원래 질문으로 되돌아갑니다.
+            search_query = _build_retry_query(state)
 
-    def retry_node(state: GraphState) -> dict[str, Any]:
-        # route만 HYBRID로 바꾸고, initial_route는 건드리지 않습니다.
-        # route_path는 '경로가 바뀐 이력', 같은 경로로 재시도할 때는
-        # 덧붙이지 않음. 재시도 횟수는 retry_count()가 따로 셈
-        path = state.get('route_path', [])
+        else:
+            retry_reason = (
+                "검색 결과의 구조적 근거가 부족해 "
+                "하이브리드 검색으로 재시도합니다."
+            )
+            search_query = state.get("question", "")
+
         return {
             "route": "HYBRID",
-            "route_path": path if path and path[-1] == "HYBRID" else [*path, 'HYBRID'],
-            "route_reason": "기존 검색 결과의 근거가 부족해 하이브리드 검색으로 재시도합니다.",
-            "retry_count": state.get("retry_count", 0) + 1,
+            "route_path": (
+                path
+                if path and path[-1] == "HYBRID"
+                else [*path, "HYBRID"]
+            ),
+            "route_reason": retry_reason,
+            "retry_reason": retry_reason,
+            "search_query": search_query,
+            "retry_count": (
+                state.get("retry_count", 0) + 1
+            ),
+
+            # 이전 시도 결과 초기화
+            "results": [],
+            "evidences": [],
+            "dropped_evidences": [],
+            "cited_answer": None,
+            "answer": "",
+            "citation_status": "",
+            "citation_failures": [],
+            "citation_conflicts": [],
+            "checked_claims": 0,
+            "supported_claims": 0,
         }
 
-    def after_route(state: GraphState) -> str:
-        return "retrieve" if state.get("route") != "REJECT" else "reject"
+    def finalize_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """검증을 통과한 답변에 실제 출처 정보를 붙입니다."""
 
-    def after_verify(state: GraphState) -> str:
+        cited_answer = state.get("cited_answer")
+        evidences = state.get("evidences", [])
+
+        if cited_answer is None:
+            return {
+                "final_status": "WITHHELD",
+                "withhold_reason": (
+                    "구조화 답변이 없습니다."
+                ),
+                "final_answer": (
+                    "답변을 보류합니다."
+                ),
+            }
+
+        final_answer = render_cited_answer(
+            cited_answer,
+            evidences,
+        )
+
+        return {
+            "final_status": "ANSWERED",
+            "withhold_reason": "",
+            "final_answer": final_answer,
+        }
+
+    def withhold_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """검증 실패 원인을 포함해 답변을 보류합니다."""
+
+        reason = _build_withhold_reason(state)
+
+        return {
+            "final_status": "WITHHELD",
+            "withhold_reason": reason,
+            "final_answer": (
+                "검색 근거만으로 안전하고 정확한 답변을 "
+                "확정할 수 없어 답변을 보류합니다.\n"
+                f"사유: {reason}"
+            ),
+        }
+
+    def reject_node(
+        state: GraphState,
+    ) -> dict[str, Any]:
+        """범위 밖 질문은 검색 없이 거절합니다."""
+
+        reason = (
+            state.get("route_reason")
+            or "질문이 서비스 범위를 벗어났습니다."
+        )
+
+        return {
+            "results": [],
+            "evidence_status": "NOT_APPLICABLE",
+            "final_status": "REJECTED",
+            "withhold_reason": "",
+            "final_answer": (
+                f"{reason} "
+                "농업 재배·병해충·농약·비료 관련 "
+                "질문을 입력해 주세요."
+            ),
+        }
+
+    def after_route(
+        state: GraphState,
+    ) -> str:
+        if state.get("route") == "REJECT":
+            return "reject"
+
+        return "retrieve"
+
+    def after_verify(
+        state: GraphState,
+    ) -> str:
         if state.get("evidence_status") == "PASS":
-            return "answer"
-        if state.get("retry_count", 0) < state.get("max_retries", max_retries):
+            return "prepare_evidence"
+
+        retry_count = state.get("retry_count", 0)
+        retry_limit = state.get(
+            "max_retries",
+            max_retries,
+        )
+
+        if retry_count < retry_limit:
             return "retry"
-        return "answer"
+
+        return "withhold"
+
+    def after_prepare_evidence(
+        state: GraphState,
+    ) -> str:
+        if state.get("evidences"):
+            return "answer_cited"
+
+        retry_count = state.get("retry_count", 0)
+        retry_limit = state.get(
+            "max_retries",
+            max_retries,
+        )
+
+        if retry_count < retry_limit:
+            return "retry"
+
+        return "withhold"
+
+    def after_citations(
+        state: GraphState,
+    ) -> str:
+        """인용 검증 결과에 따라 최종 행동을 결정합니다."""
+
+        # 유효한 근거끼리 충돌하면 PASS보다 우선하여 보류
+        if state.get("citation_conflicts"):
+            return "withhold"
+
+        status = state.get("citation_status")
+        retry_count = state.get("retry_count", 0)
+        retry_limit = state.get(
+            "max_retries",
+            max_retries,
+        )
+
+        if status == "PASS":
+            return "finalize"
+
+        # PARTIAL 과 FAIL 모두 한도 안에서는 HYBRID 로 승격해 다시 검색합니다.
+        # 근거를 더 받으면 인용이 붙을 수 있으므로 첫 실패로 보류하지 않습니다.
+        if (
+            status in {"PARTIAL", "FAIL"}
+            and retry_count < retry_limit
+        ):
+            return "retry"
+
+        return "withhold"
 
 
-
+    # =====================================
+    # 1. LangGraph 생성
+    # =====================================
     workflow = StateGraph(GraphState)
 
     # =====================================
-    # 1. Supervisor 노드 등록
+    # 2. Supervisor / 검색 노드 등록
     # =====================================
     workflow.add_node("route", route_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("verify", verify_node)
+
+    # Evidence / Citation
+    workflow.add_node(
+        "prepare_evidence",
+        prepare_evidence_node,
+    )
+    workflow.add_node(
+        "answer_cited",
+        answer_cited_node,
+    )
+    workflow.add_node(
+        "verify_citations",
+        verify_citations_node,
+    )
+
+    # 재검색 / 최종 처리
     workflow.add_node("retry", retry_node)
-    workflow.add_node("answer", answer_node)
+    workflow.add_node("finalize", finalize_node)
+    workflow.add_node("withhold", withhold_node)
     workflow.add_node("reject", reject_node)
 
     # =====================================
-    # 2. Guardrails 노드 등록
+    # 3. Guardrails 노드 등록
     # =====================================
-    workflow.add_node("input_safety", input_safety_node)
-    workflow.add_node("dialog", dialog_node)
-    workflow.add_node("guardrails", guardrails_node)
+
+    # Input / Dialog Rail
+    workflow.add_node(
+        "input_safety",
+        input_safety_node,
+    )
+    workflow.add_node(
+        "dialog",
+        dialog_node,
+    )
 
     # Execution Rail
     workflow.add_node(
@@ -313,11 +802,24 @@ def build_supervisor(
         ),
     )
 
+    # Output Guardrails
+    workflow.add_node(
+        "guardrails",
+        guardrails_fn or guardrails_node,
+    )
+
     # =====================================
-    # 3. Input Rail → Dialog Rail
+    # 4. START → Input / Dialog Rail
     # =====================================
-    workflow.add_edge(START, "input_safety")
-    workflow.add_edge("input_safety", "dialog")
+    workflow.add_edge(
+        START,
+        "input_safety",
+    )
+
+    workflow.add_edge(
+        "input_safety",
+        "dialog",
+    )
 
     workflow.add_conditional_edges(
         "dialog",
@@ -329,7 +831,7 @@ def build_supervisor(
     )
 
     # =====================================
-    # 4. Router 분기
+    # 5. Router → 검색
     # =====================================
     workflow.add_conditional_edges(
         "route",
@@ -340,44 +842,104 @@ def build_supervisor(
         },
     )
 
+    workflow.add_edge(
+        "retrieve",
+        "verify",
+    )
+
     # =====================================
-    # 5. 검색 → Retrieval Rail 검증
+    # 6. Retrieval Rail / Evidence 검증
     # =====================================
-    workflow.add_edge("retrieve", "verify")
+    # verify_node 내부에서 Retrieval Rail 실행
 
     workflow.add_conditional_edges(
         "verify",
         after_verify,
         {
+            "prepare_evidence": "prepare_evidence",
             "retry": "retry",
-            "answer": "execution",
+            "withhold": "withhold",
         },
     )
 
-    # 근거 부족 시 기존 재검색 유지
-    workflow.add_edge("retry", "retrieve")
+    # =====================================
+    # 7. Evidence 생성 → Execution Rail
+    # =====================================
+    workflow.add_conditional_edges(
+        "prepare_evidence",
+        after_prepare_evidence,
+        {
+            "answer_cited": "execution",
+            "retry": "retry",
+            "withhold": "withhold",
+        },
+    )
 
     # =====================================
-    # 6. Execution Rail 분기
+    # 8. Execution Rail 검증
     # =====================================
     workflow.add_conditional_edges(
         "execution",
         after_execution,
         {
-            "answer": "answer",
+            "answer": "answer_cited",
             "end": END,
         },
     )
 
     # =====================================
-    # 7. Answer → Output Guardrails
+    # 9. Citation 답변 생성 및 검증
     # =====================================
-    workflow.add_edge("answer", "guardrails")
-    workflow.add_edge("guardrails", END)
+    workflow.add_edge(
+        "answer_cited",
+        "verify_citations",
+    )
 
-    # 범위 밖 질문은 별도 종료
-    workflow.add_edge("reject", END)
+    workflow.add_conditional_edges(
+        "verify_citations",
+        after_citations,
+        {
+            "finalize": "finalize",
+            "retry": "retry",
+            "withhold": "withhold",
+        },
+    )
 
+    # =====================================
+    # 10. HYBRID 재검색
+    # =====================================
+    workflow.add_edge(
+        "retry",
+        "retrieve",
+    )
+
+    # =====================================
+    # 11. 최종 답변 검증
+    # =====================================
+    workflow.add_edge(
+        "finalize",
+        "guardrails",
+    )
+
+    workflow.add_edge(
+        "guardrails",
+        END,
+    )
+
+    # =====================================
+    # 12. 보류 / 범위 밖 질문 종료
+    # =====================================
+    workflow.add_edge(
+        "withhold",
+        END,
+    )
+
+    workflow.add_edge(
+        "reject",
+        END,
+    )
+
+    # =====================================
+    # 13. 컴파일
+    # =====================================
     return workflow.compile()
-
-

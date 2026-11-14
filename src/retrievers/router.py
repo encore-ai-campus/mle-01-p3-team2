@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Literal
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:  # pragma: no cover
+    BaseModel = None
+    Field = None
 
 try:
     from langchain_typesafe import Choice, TypeSafeClassifier
@@ -14,6 +21,14 @@ except ImportError:  # Optional until TYPESAFE_API_KEY is configured.
 
 Route = Literal["GRAPH", "VECTOR", "HYBRID", "REJECT"]
 
+VALID_RELATION_TYPES = frozenset({
+    "HAS_VARIETY", "SUITABLE_FOR_REGION",
+    "HAS_SOWING_OBSERVATION", "HAS_SOWING_RECOMMENDATION", "USES_VARIETY",
+    "HAS_ENVIRONMENT_REQUIREMENT", "HAS_ENVIRONMENT_OBSERVATION",
+    "HAS_GROWTH_OBSERVATION", "AFFECTED_BY_DISEASE", "AFFECTED_BY_INSECT",
+    "HAS_REGISTERED_PESTICIDE_USE", "CONTROLS_TARGET", "HAS_FERTILIZER_STANDARD",
+})
+
 
 @dataclass(frozen=True)
 class RouteDecision:
@@ -21,7 +36,54 @@ class RouteDecision:
     reason: str
     crop: str | None = None
     max_hops: int = 2
+    entities: list[str] = field(default_factory=list)
+    relation_types: list[str] = field(default_factory=list)
+    needs_official_evidence: bool = False
+    confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
+
+
+if BaseModel is not None:
+    class QueryAnalysis(BaseModel):
+        crop: str | None = None
+        entities: list[str] = Field(default_factory=list)
+        relation_types: list[str] = Field(default_factory=list)
+        max_hops: int = 2
+        needs_official_evidence: bool = False
+else:  # pragma: no cover
+    QueryAnalysis = None
+
+
+class LLMQueryAnalyzer:
+    """GRAPH/HYBRID 질문에 필요한 검색 조건만 구조화합니다."""
+
+    def __init__(self, model):
+        self.model = model
+
+    @classmethod
+    def from_env(cls):
+        import os
+
+        if not os.getenv("OPENAI_API_KEY") or QueryAnalysis is None:
+            return None
+        try:
+            from langchain_openai import ChatOpenAI
+
+            model = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0,
+            ).with_structured_output(QueryAnalysis)
+            return cls(model)
+        except Exception:
+            return None
+
+    def analyze(self, question: str) -> QueryAnalysis:
+        return self.model.invoke(
+            "질문에서 그래프 검색 조건만 추출하세요. "
+            "답변하거나 안전 판단하지 마세요. "
+            "작물, 품종·병해충·지역·환경 엔티티, 필요한 관계 타입, hop 수, "
+            "공식 근거 필요 여부를 구조화합니다.\n질문: " + question
+        )
 
 
 class QuestionRouter:
@@ -30,6 +92,7 @@ class QuestionRouter:
     GRAPH_TERMS = (
         "관계", "연결", "경로", "품종", "적합 지역", "파종 시기", "생육 단계",
         "병해", "병해충", "해충", "환경 조건", "멀티홉", "어떤 지역",
+        "어느 지역",
     )
     VECTOR_TERMS = (
         "방법", "뜻", "의미", "설명", "재배법", "관리법", "관수 방법",
@@ -149,15 +212,23 @@ class QuestionRouter:
 class JevQuestionRouter(QuestionRouter):
     """JEV를 사용하고, 실패하면 규칙 기반 Router로 fallback합니다."""
 
-    def __init__(self, classifier=None):
+    def __init__(self, classifier=None, analyzer=None):
         self.classifier = classifier
+        self.analyzer = analyzer
 
     @classmethod
     def from_env(cls) -> "JevQuestionRouter":
         if TypeSafeClassifier is None:
             return cls()
         try:
-            return cls(TypeSafeClassifier())
+            classifier = TypeSafeClassifier(
+                model=os.getenv("TYPESAFE_MODEL", "jev-latest"),
+                base_url=os.getenv(
+                    "TYPESAFE_BASE_URL",
+                    "https://api.typesafe.ai",
+                ),
+            )
+            return cls(classifier, LLMQueryAnalyzer.from_env())
         except (TypeError, ValueError):
             return cls()
 
@@ -195,12 +266,30 @@ class JevQuestionRouter(QuestionRouter):
             if route not in {"GRAPH", "VECTOR", "HYBRID", "REJECT"}:
                 raise ValueError(f"Unexpected Jev route: {route!r}")
             fallback = super().route_query(question)
+            analysis = None
+            warnings = list(fallback.warnings)
+            if route in {"GRAPH", "HYBRID"} and self.analyzer is not None:
+                try:
+                    analysis = self.analyzer.analyze(question)
+                except Exception:
+                    warnings.append("그래프 검색 조건 LLM 분석에 실패했습니다.")
+            valid_relations = [
+                relation
+                for relation in (analysis.relation_types if analysis else [])
+                if relation in VALID_RELATION_TYPES
+            ]
+            if analysis and len(valid_relations) != len(analysis.relation_types):
+                warnings.append("LLM이 반환한 일부 관계 타입을 제외했습니다.")
             return RouteDecision(
                 route=route,
                 reason="Jev 구조화 라우팅 결과",
-                crop=fallback.crop,
-                max_hops=fallback.max_hops,
-                warnings=fallback.warnings,
+                crop=(analysis.crop if analysis and analysis.crop else fallback.crop),
+                max_hops=(analysis.max_hops if analysis else fallback.max_hops),
+                entities=(analysis.entities if analysis else []),
+                relation_types=valid_relations,
+                needs_official_evidence=(analysis.needs_official_evidence if analysis else False),
+                confidence=None,
+                warnings=warnings,
             )
         except Exception:
             fallback = super().route_query(question)

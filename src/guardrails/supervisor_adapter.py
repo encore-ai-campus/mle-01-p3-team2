@@ -27,7 +27,7 @@ def guardrails_node(state: dict[str, Any]) -> dict[str, Any]:
     """Supervisor 답변에 근거 검증과 농약 사용조건 검증을 적용한다."""
 
     question = state.get("question", "")
-    answer = state.get("answer", "")
+    answer = state.get("final_answer") or state.get("answer", "")
     results = state.get("results", [])
 
     # 1. 답변과 검색 근거 확인

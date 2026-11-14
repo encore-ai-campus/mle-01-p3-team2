@@ -52,6 +52,8 @@ dependencies = [
     #   ColBERT 비교는 FlagEmbedding 의 BGEM3FlagModel 을 쓴다. 두 모델 가중치는 huggingface_hub 로 미리 받는다.
     #   교안이 이 조합으로 점수·순위를 확인했으므로 버전을 고정한다.
     "sentence-transformers==6.1.0",
+    # Offline evaluation uses process RSS sampling for reranker memory costs.
+    "psutil>=7.0",
     "transformers==5.17.0",
     "torch==2.14.0",
     "FlagEmbedding==1.4.2",
@@ -142,8 +144,15 @@ dependencies = [
     "pydantic-settings>=2.14",
     "aiosqlite>=0.22",
     "pillow>=12",
+    "starlette==1.3.1",
+    "torchvision>=0.29.2",
 ]
 
 [tool.uv]
 # Windows 수업 PC에서 wheel 전용 패키지도 설치할 수 있도록 해석한다.
 required-environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests", "src/streamlit/tests"]
+asyncio_default_fixture_loop_scope = "function"
