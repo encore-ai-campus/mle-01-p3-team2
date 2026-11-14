@@ -144,3 +144,65 @@ def test_scope_gate_rejects_market_price_question():
     # 말뭉치에 시세 자료가 없어 작물 이름이 있어도 범위 밖입니다.
     decision = QuestionRouter().decide("배추 도매 가격이 얼마인가요?")
     assert decision.route == "REJECT"
+
+
+# --- 식별형 질문이 VECTOR로 빠져 그래프 관계를 놓치던 회귀 (GS025) ---
+
+
+def test_rule_router_treats_identification_question_as_graph_signal():
+    """'~병은 무엇인가요'는 그래프 관계에만 답이 있어 원문 검색만으로는 부족하다."""
+    decision = QuestionRouter().decide(
+        "양파의 어린 유묘에서 생육이 정지되고 지상부가 시들며, "
+        "인경 내부에 검은색 가루가 가득 보이는 병은 무엇인가요?"
+    )
+    assert decision.route in {"GRAPH", "HYBRID"}
+
+
+def test_rule_router_keeps_vector_for_method_question():
+    """재배 방법을 묻는 질문은 식별형이 아니므로 VECTOR를 유지한다."""
+    decision = QuestionRouter().decide("배추 관수 방법을 설명해 주세요.")
+    assert decision.route == "VECTOR"
+
+
+def test_jev_router_upgrades_vector_to_hybrid_for_identification_question():
+    """분류기가 VECTOR를 골라도 식별형 질문이면 그래프 탐색을 더한다."""
+
+    class Classifier:
+        def invoke(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                choices={"route": SimpleNamespace(choice="VECTOR")}
+            )
+
+    decision = JevQuestionRouter(Classifier()).route_query(
+        "제주도에서 재배하기에 적합한 양파 품종은 무엇인가요?"
+    )
+    assert decision.route == "HYBRID"
+    assert "식별형" in decision.reason
+
+
+def test_jev_router_keeps_vector_when_not_identification_question():
+    """식별형이 아니면 분류기의 VECTOR 판단을 그대로 둔다."""
+
+    class Classifier:
+        def invoke(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                choices={"route": SimpleNamespace(choice="VECTOR")}
+            )
+
+    decision = JevQuestionRouter(Classifier()).route_query(
+        "배추 관수 방법을 설명해 주세요."
+    )
+    assert decision.route == "VECTOR"
+
+
+def test_relation_type_guide_covers_every_valid_relation():
+    """프롬프트 안내 목록이 VALID_RELATION_TYPES와 어긋나면 검색 조건이 비어버린다."""
+    from src.retrievers.router import (
+        RELATION_TYPE_DESCRIPTIONS,
+        RELATION_TYPE_GUIDE,
+        VALID_RELATION_TYPES,
+    )
+
+    assert set(RELATION_TYPE_DESCRIPTIONS) == set(VALID_RELATION_TYPES)
+    for name in VALID_RELATION_TYPES:
+        assert name in RELATION_TYPE_GUIDE

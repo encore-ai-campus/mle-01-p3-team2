@@ -30,6 +30,30 @@ VALID_RELATION_TYPES = frozenset({
 })
 
 
+# LLM이 relation_types를 추측해서 한국어로 돌려주면 VALID_RELATION_TYPES 필터에서
+# 전부 걸러져 그래프 탐색이 관계 조건 없이 실행된다. 프롬프트에 그대로 넣어
+# 허용되는 이름만 쓰도록 고정한다.
+RELATION_TYPE_DESCRIPTIONS: dict[str, str] = {
+    "AFFECTED_BY_DISEASE": "작물이 걸리는 병. 증상으로 병명을 찾는 질문 포함",
+    "AFFECTED_BY_INSECT": "작물에 피해를 주는 해충. 피해 양상으로 해충을 찾는 질문 포함",
+    "CONTROLS_TARGET": "약제가 방제하는 대상 병해충",
+    "HAS_ENVIRONMENT_OBSERVATION": "실제 관측된 재배 환경 값",
+    "HAS_ENVIRONMENT_REQUIREMENT": "작물이 요구하는 재배 환경 조건",
+    "HAS_FERTILIZER_STANDARD": "비료 표준 사용량",
+    "HAS_GROWTH_OBSERVATION": "생육 관측 기록",
+    "HAS_REGISTERED_PESTICIDE_USE": "작물에 등록된 농약 사용 기준",
+    "HAS_SOWING_OBSERVATION": "실제 파종 기록(지역·날짜·품종)",
+    "HAS_SOWING_RECOMMENDATION": "권장 파종 시기",
+    "HAS_VARIETY": "작물이 가진 품종",
+    "SUITABLE_FOR_REGION": "품종·작물에 적합한 지역",
+    "USES_VARIETY": "특정 재배 기록이 사용한 품종",
+}
+
+RELATION_TYPE_GUIDE = "\n".join(
+    f"- {name}: {description}"
+    for name, description in sorted(RELATION_TYPE_DESCRIPTIONS.items())
+)
+
 @dataclass(frozen=True)
 class RouteDecision:
     route: Route
@@ -82,7 +106,13 @@ class LLMQueryAnalyzer:
             "질문에서 그래프 검색 조건만 추출하세요. "
             "답변하거나 안전 판단하지 마세요. "
             "작물, 품종·병해충·지역·환경 엔티티, 필요한 관계 타입, hop 수, "
-            "공식 근거 필요 여부를 구조화합니다.\n질문: " + question
+            "공식 근거 필요 여부를 구조화합니다.\n\n"
+            "relation_types는 반드시 아래 목록의 영문 이름만 사용하세요. "
+            "목록에 없는 값이나 한국어 설명을 쓰면 검색에 반영되지 않습니다. "
+            "해당하는 관계가 없으면 빈 목록으로 두세요.\n"
+            + RELATION_TYPE_GUIDE
+            + "\n질문: "
+            + question
         )
 
 
@@ -98,6 +128,14 @@ class QuestionRouter:
         "방법", "뜻", "의미", "설명", "재배법", "관리법", "관수 방법",
         "시비 방법", "방제 방법", "예방", "무엇인가", "어떻게 재배",
     )
+    # "~병은 무엇인가요", "~품종에는 어떤 것이 있나요"처럼 특징을 주고 대상을
+    # 식별해 달라는 질문. 병명·해충명·품종명은 청크 본문이 아니라 그래프 관계에만
+    # 있는 경우가 많아 VECTOR로 보내면 근거를 찾지 못한다.
+    IDENTIFICATION_PATTERN = re.compile(
+        r"(?:병|병해|병해충|해충|품종|작물|약제|농약)(?:은|는|이|가|에는|으로는)?\s*"
+        r"(?:무엇|뭐|무슨|어떤\s*(?:것|게|거))"
+    )
+
     OFFICIAL_NUMERIC_TERMS = (
         "농약", "비료", "희석", "배율", "사용량", "안전사용", "수확 전",
     )
@@ -211,7 +249,9 @@ class QuestionRouter:
 
         normalized = re.sub(r"\s+", " ", question.strip())
         crop = next((crop for crop in self.CROPS if crop in normalized), None)
-        has_graph = any(term in normalized for term in self.GRAPH_TERMS)
+        has_graph = any(term in normalized for term in self.GRAPH_TERMS) or bool(
+            self.IDENTIFICATION_PATTERN.search(normalized)
+        )
         has_vector = any(term in normalized for term in self.VECTOR_TERMS)
         requires_official = any(term in normalized for term in self.OFFICIAL_NUMERIC_TERMS)
 
@@ -296,6 +336,14 @@ class JevQuestionRouter(QuestionRouter):
             route = response.choices["route"].choice
             if route not in {"GRAPH", "VECTOR", "HYBRID", "REJECT"}:
                 raise ValueError(f"Unexpected Jev route: {route!r}")
+            upgraded_reason = None
+            if route == "VECTOR" and self.IDENTIFICATION_PATTERN.search(question):
+                # 식별형 질문은 그래프 관계에만 답이 있는 경우가 있어 원문 검색만으로는
+                # 근거를 찾지 못한다. 벡터 결과를 버리지 않도록 HYBRID로 올린다.
+                route = "HYBRID"
+                upgraded_reason = (
+                    "식별형 질문이라 원문 검색에 그래프 관계 탐색을 더했습니다."
+                )
             fallback = super().route_query(question)
             analysis = None
             warnings = list(fallback.warnings)
@@ -313,7 +361,7 @@ class JevQuestionRouter(QuestionRouter):
                 warnings.append("LLM이 반환한 일부 관계 타입을 제외했습니다.")
             return RouteDecision(
                 route=route,
-                reason="Jev 구조화 라우팅 결과",
+                reason=upgraded_reason or "Jev 구조화 라우팅 결과",
                 crop=(analysis.crop if analysis and analysis.crop else fallback.crop),
                 max_hops=(analysis.max_hops if analysis else fallback.max_hops),
                 entities=(analysis.entities if analysis else []),
