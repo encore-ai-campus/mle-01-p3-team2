@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -193,6 +194,120 @@ def render_chat_page() -> None:
 
     if question:
         handle_question(question)
+
+
+# Aura 기업 그래프 색은 데이터에 따라 흔들리지 않게 고정값으로 둡니다.
+#   중심 기업은 로즈, 중심과 이어진 모회사(계열)는 페리윙클, 자회사·주변 노드는 회색입니다.
+GRAPH_BORDER_COLOR = "#b4aaa1"
+GRAPH_CENTER_COLOR = "#f4b6c2"
+GRAPH_AFFILIATE_COLOR = "#b8c0ff"
+GRAPH_SUBSIDIARY_COLOR = "#cfccc4"
+GRAPH_VIS_SCRIPT = (
+    "https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/dist/vis-network.min.js"
+)
+
+
+def _graph_node_color(node: dict[str, object]) -> str:
+    """노드의 중요도(중심 여부·회사 종류)에 따라 고정 색을 돌려줍니다."""
+
+    try:
+        level = int(node.get("level") or 0)
+    except (TypeError, ValueError):
+        level = 0
+    if level == 0:
+        return GRAPH_CENTER_COLOR
+    if str(node.get("group")) == "ParentCompany":
+        return GRAPH_AFFILIATE_COLOR
+    return GRAPH_SUBSIDIARY_COLOR
+
+
+def render_aura_graph_html(
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]],
+    height: int = 560,
+) -> str:
+    """Aura 그래프를 vis-network 마크업으로 만듭니다.
+
+    build_graph_elements() 가 만든 노드·엣지를 그대로 받습니다. 노드는 사용자가
+    끌어 옮길 수 있어야 하므로 좌표를 고정하지 않습니다.
+    """
+
+    vis_nodes = [
+        {
+            "id": node["id"],
+            "label": str(node.get("label") or node["id"]),
+            "title": str(node.get("label") or node["id"]),
+            "group": str(node.get("group") or "Unknown"),
+            "level": int(node.get("level") or 0),
+            "color": {
+                "background": _graph_node_color(node),
+                "border": GRAPH_BORDER_COLOR,
+                "highlight": {
+                    "background": _graph_node_color(node),
+                    "border": GRAPH_BORDER_COLOR,
+                },
+            },
+        }
+        for node in nodes
+    ]
+    vis_edges = [
+        {
+            "from": edge["source"],
+            "to": edge["target"],
+            "label": str(edge.get("relation") or ""),
+            "title": str(edge.get("relation") or ""),
+        }
+        for edge in edges
+    ]
+    options = {
+        "nodes": {
+            "shape": "dot",
+            "size": 22,
+            "borderWidth": 2,
+            "font": {"size": 15, "color": "#4a443e"},
+        },
+        "edges": {
+            "color": GRAPH_BORDER_COLOR,
+            "width": 1.4,
+            "arrows": {"to": {"enabled": True, "scaleFactor": 0.6}},
+            "font": {"size": 11, "color": "#7a736b", "strokeWidth": 3},
+            "smooth": {"enabled": True, "type": "dynamic"},
+        },
+        "interaction": {
+            "dragNodes": True,
+            "dragView": True,
+            "zoomView": True,
+            "hover": True,
+            "tooltipDelay": 120,
+        },
+        "physics": {
+            "enabled": True,
+            "solver": "forceAtlas2Based",
+            "stabilization": {"iterations": 220},
+        },
+    }
+
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<script src="{GRAPH_VIS_SCRIPT}"></script>
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; }}
+  #aura-graph {{ width: 100%; height: {height}px; }}
+</style>
+</head>
+<body>
+<div id="aura-graph"></div>
+<script>
+  const nodes = new vis.DataSet({json.dumps(vis_nodes)});
+  const edges = new vis.DataSet({json.dumps(vis_edges)});
+  const options = {json.dumps(options)};
+  new vis.Network(document.getElementById("aura-graph"), {{nodes, edges}}, options);
+</script>
+</body>
+</html>
+"""
 
 
 def render_locked_page(label: str) -> None:

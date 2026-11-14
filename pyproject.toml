@@ -151,3 +151,8 @@ dependencies = [
 [tool.uv]
 # Windows 수업 PC에서 wheel 전용 패키지도 설치할 수 있도록 해석한다.
 required-environments = ["sys_platform == 'win32' and platform_machine == 'AMD64'"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests", "src/streamlit/tests"]
+asyncio_default_fixture_loop_scope = "function"

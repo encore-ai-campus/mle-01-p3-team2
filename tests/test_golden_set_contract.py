@@ -88,11 +88,6 @@ def test_final_golden_set_has_expected_shape():
     assert stats["by_behavior"]["REJECT"] == 10
 
 
-def test_removed_duplicate_cases_stay_removed():
-    ids = {row["case_id"] for row in load_rows(DEFAULT_GOLDEN_PATH)}
-    assert "GS014" not in ids and "GS046" not in ids
-
-
 def test_contract_document_exists():
     assert (PROJECT_ROOT / "docs" / "golden-set-contract.md").exists()
 

@@ -188,8 +188,61 @@ def _read_top10(path: Path, cases: list[dict]) -> dict[str, dict]:
     return results
 
 
-def evaluate(cases: list[dict], top10: dict[str, dict], router: QuestionRouter) -> tuple[list[dict], dict]:
-    """Evaluate initial routing and oracle-route Hit@K (not end-to-end Hit@K)."""
+def _hit_flags(
+    hits: list[dict], evidence_ids: set[str], chunk_ids: set[str],
+) -> dict[int, tuple[bool, bool]]:
+    """Top-10 순위를 K 구간별로 누적해 (evidence 적중, chunk 적중) 을 돌려준다."""
+    found_evidence: set[str] = set()
+    found_chunks: set[str] = set()
+    checked = 0
+    flags: dict[int, tuple[bool, bool]] = {}
+    for k in KS:
+        for hit in hits[checked:k]:
+            found_evidence.update(hit.get("evidence_ids") or ())
+            found_chunks.update(hit.get("chunk_ids") or ())
+        checked = k
+        flags[k] = (bool(evidence_ids & found_evidence), bool(chunk_ids & found_chunks))
+    return flags
+
+
+def _read_actual_top10(path: Path, cases: list[dict]) -> dict[str, dict]:
+    """라우터가 실제로 고른 경로로 모은 Top-10 파일을 읽는다.
+
+    경로는 라우터 판정에 따라 달라지므로 ``_read_top10`` 과 달리 기대 경로와의
+    일치는 보지 않고, 중복·미등록 case_id 와 순위만 확인한다.
+    """
+    known = {case["case_id"] for case in cases}
+    results: dict[str, dict] = {}
+    with path.open(encoding="utf-8") as stream:
+        for line_no, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            case_id = row["case_id"]
+            if case_id in results:
+                raise ValueError(f"Duplicate actual-route case_id: {case_id} (line {line_no})")
+            if case_id not in known:
+                raise ValueError(f"Unexpected actual-route case_id: {case_id}")
+            hits = row.get("hits", [])
+            if len(hits) > 10 or any(hit.get("rank") != rank for rank, hit in enumerate(hits, 1)):
+                raise ValueError(f"Invalid ranks for {case_id}")
+            results[case_id] = row
+    return results
+
+
+def evaluate(
+    cases: list[dict],
+    top10: dict[str, dict],
+    router: QuestionRouter,
+    actual_hits: dict[str, dict] | None = None,
+) -> tuple[list[dict], dict]:
+    """Evaluate initial routing, oracle-route Hit@K, and optionally actual-route Hit@K.
+
+    ``top10`` 은 기대 경로를 강제해 모은 Top-10 이고, ``actual_hits`` 는 라우터가
+    실제로 고른 경로로 모은 Top-10 이다. 둘을 따로 집계해야 "검색이 못 찾은 것"과
+    "라우팅이 틀려서 못 찾은 것"을 구분할 수 있다.
+    ``actual_hits`` 를 넘기지 않으면 실제 경로 지표는 None 으로 남는다.
+    """
     details: list[dict] = []
     matrix = {route: {actual: 0 for actual in ROUTES} for route in ROUTES}
     grouped: dict[str, list[dict]] = {route: [] for route in ROUTES}
@@ -214,30 +267,40 @@ def evaluate(cases: list[dict], top10: dict[str, dict], router: QuestionRouter) 
         }
         evidence_ids = set(case.get("expected_evidence_ids") or ())
         chunk_ids = set(case.get("expected_source_chunk_ids") or ())
-        hits = top10[case["case_id"]]["hits"] if expected in SEARCH_ROUTES else []
-        found_evidence: set[str] = set()
-        found_chunks: set[str] = set()
-        checked = 0
-        for k in KS:
-            if expected == "REJECT":
+        if expected == "REJECT":
+            for k in KS:
                 row[f"hit_at_{k}"] = None
                 row[f"evidence_hit_at_{k}"] = None
                 row[f"chunk_hit_at_{k}"] = None
-                continue
-            for hit in hits[checked:k]:
-                found_evidence.update(hit.get("evidence_ids") or ())
-                found_chunks.update(hit.get("chunk_ids") or ())
-            checked = k
-            evidence_hit = bool(evidence_ids & found_evidence)
-            chunk_hit = bool(chunk_ids & found_chunks)
-            row[f"evidence_hit_at_{k}"] = evidence_hit
-            row[f"chunk_hit_at_{k}"] = chunk_hit
-            row[f"hit_at_{k}"] = evidence_hit or chunk_hit
+                row[f"actual_route_hit_at_{k}"] = None
+        else:
+            forced_hits = top10[case["case_id"]]["hits"] if expected in SEARCH_ROUTES else []
+            for k, (evidence_hit, chunk_hit) in _hit_flags(
+                forced_hits, evidence_ids, chunk_ids
+            ).items():
+                row[f"evidence_hit_at_{k}"] = evidence_hit
+                row[f"chunk_hit_at_{k}"] = chunk_hit
+                row[f"hit_at_{k}"] = evidence_hit or chunk_hit
+
+            if actual_hits is None:
+                for k in KS:
+                    row[f"actual_route_hit_at_{k}"] = None
+            else:
+                # 라우터가 REJECT 를 골랐다면 검색을 돌리지 않았으므로 적중은 없다.
+                taken_hits = (
+                    (actual_hits.get(case["case_id"]) or {}).get("hits") or []
+                    if actual in SEARCH_ROUTES
+                    else []
+                )
+                for k, (evidence_hit, chunk_hit) in _hit_flags(
+                    taken_hits, evidence_ids, chunk_ids
+                ).items():
+                    row[f"actual_route_hit_at_{k}"] = evidence_hit or chunk_hit
         details.append(row)
         grouped[expected].append(row)
 
-    def metric(rows: list[dict], k: int) -> dict:
-        count = sum(row[f"hit_at_{k}"] is True for row in rows)
+    def metric(rows: list[dict], k: int, prefix: str = "hit_at") -> dict:
+        count = sum(row[f"{prefix}_{k}"] is True for row in rows)
         return {"hits": count, "rate": round(count / len(rows), 6) if rows else None}
 
     def route_counts(route: str) -> dict:
@@ -268,6 +331,11 @@ def evaluate(cases: list[dict], top10: dict[str, dict], router: QuestionRouter) 
         "hit_at_k": {str(k): metric(search_rows, k) for k in KS},
         "hit_at_k_mode": "expected_route_oracle",
     }
+    if actual_hits is not None:
+        summary["actual_route_hit_at_k"] = {
+            str(k): metric(search_rows, k, "actual_route_hit_at") for k in KS
+        }
+        summary["actual_route_hit_at_k_mode"] = "router_actual_route"
     return details, summary
 
 
@@ -495,6 +563,7 @@ def write_reports(
         *(field for k in KS for field in (
             f"evidence_hit_at_{k}", f"chunk_hit_at_{k}", f"hit_at_{k}"
         )),
+        *(f"actual_route_hit_at_{k}" for k in KS),
     )
     csv_path = output_dir / "retrieval_case_results.csv"
     with csv_path.open("w", encoding="utf-8-sig", newline="") as stream:
@@ -532,8 +601,29 @@ def write_reports(
         str(routing["incorrect"]), f"{routing['accuracy'] * 100:.2f}%",
         *(_fraction(summary["hit_at_k"][str(k)]["hits"], summary["search_questions"], summary["hit_at_k"][str(k)]["rate"]) for k in KS),
     ]
+    lines.append("| " + " | ".join(overall_values) + " |")
+    if "actual_route_hit_at_k" in summary:
+        actual_values = [
+            "전체",
+            *(
+                _fraction(
+                    summary["actual_route_hit_at_k"][str(k)]["hits"],
+                    summary["search_questions"],
+                    summary["actual_route_hit_at_k"][str(k)]["rate"],
+                )
+                for k in KS
+            ),
+        ]
+        lines.extend([
+            "", "### 실제 라우팅 경로 Hit@K", "",
+            "위 표의 Hit@K는 기대 경로를 강제한 수치입니다. 아래는 라우터가 실제로 고른 경로로 검색한 Top-10 기준이며, 라우터가 REJECT를 고른 문항은 적중 없음으로 셉니다. 두 수치의 차이가 라우팅 오류로 잃은 적중입니다.",
+            "",
+            "| 구분 | Hit@1 | Hit@3 | Hit@5 | Hit@10 |",
+            "| --- | ---: | ---: | ---: | ---: |",
+            "| " + " | ".join(actual_values) + " |",
+        ])
     lines.extend([
-        "| " + " | ".join(overall_values) + " |", "",
+        "",
         "## 라우팅 혼동 행렬", "",
         "행은 기대 경로, 열은 실제 경로입니다.", "",
         "| 기대 \\ 실제 | VECTOR | GRAPH | HYBRID | REJECT |",
@@ -585,6 +675,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--golden-set", type=Path, default=DEFAULT_GOLDEN_PATH)
     parser.add_argument("--top10", type=Path, default=REPORT_DIR / "top10_results.jsonl")
+    parser.add_argument(
+        "--actual-top10", type=Path, default=None,
+        help="라우터가 실제로 고른 경로로 모은 Top-10 JSONL. 주면 실제 경로 Hit@K를 따로 집계한다.",
+    )
     parser.add_argument("--output-dir", type=Path, default=REPORT_DIR)
     parser.add_argument("--relations", type=Path, default=PROJECT_ROOT / "data" / "processed" / "relations.jsonl")
     parser.add_argument("--collect", action="store_true", help="Refresh Top-10 from Neo4j")
@@ -606,7 +700,10 @@ def main() -> None:
     if args.collect:
         collect_top10(cases, args.top10, router, graph)
     top10 = _read_top10(args.top10, cases)
-    details, summary = evaluate(cases, top10, router)
+    actual_top10 = (
+        _read_actual_top10(args.actual_top10, cases) if args.actual_top10 else None
+    )
+    details, summary = evaluate(cases, top10, router, actual_top10)
     multihop_details, multihop_summary = evaluate_multihop_paths(
         cases, top10, details, args.relations
     )

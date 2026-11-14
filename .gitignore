@@ -230,3 +230,6 @@ data/portable/
 # Streamlit secrets
 .streamlit/secrets.toml
 **/.streamlit/secrets.toml
+
+# README에서 제외한 섹션 백업 (추적하지 않음)
+_private/

@@ -279,7 +279,8 @@ uv run python -m pytest tests -q
 ```
 
 > 결과는 `data/evaluation/` 및 `data/evaluation/reports/` 에 JSONL·JSON·CSV로 저장됩니다.
-> Neo4j가 필요한 평가는 로컬 셸에서 직접 실행하는 것을 권장합니다(§7의 연결 이슈 참고).
+> Neo4j가 필요한 평가는 로컬 셸에서 직접 실행하는 것을 권장합니다
+> (연결 오류 사례는 [VECTOR 검색 최적화 리포트](docs/vector-search-optimization-report.md) 2.1 참고).
 
 ### 4.6 UI 사용법
 
@@ -410,106 +411,7 @@ mle-01-p3-team2/
 
 ---
 
-## 7. 평가 결과
-
-**평가 조건** — 평가셋 **67문항**(`data/evaluation/golden_set_final.jsonl`), 데이터 범위 5대 작물
-(엔터티 30,933 · 관계 46,034 · 청크 30,661), 기준정보 수집·검증 2026-11-11까지.
-라우팅·검색 평가는 exact-match(ID 일치) 기준이며, **Gold ID는 검색 입력이나 점수 계산에 쓰지 않았습니다.**
-
-### 7.1 평가 질문 구성
-
-| 질문 유형 | 문항 수 | 기대 경로 | 기대 동작 |
-|---|---:|---|---|
-| `fact` (단순 사실) | 18 | vector 16 / graph 2 | ANSWER 12 · ANSWER_WITH_WARNING 6 |
-| `relation` (관계) | 19 | graph 19 | ANSWER 13 · ANSWER_WITH_WARNING 6 |
-| `multi_hop` (복합 관계) | 19 | hybrid 17 / vector 2 | ANSWER_WITH_WARNING 17 · ANSWER 2 |
-| `comparison` (비교) | 1 | vector 1 | ANSWER_WITH_WARNING 1 |
-| `out_of_scope` (근거 없음·범위 밖) | 10 | reject 10 | REJECT 10 |
-| **합계** | **67** | vector 19 · graph 21 · hybrid 17 · reject 10 | — |
-
-각 문항은 `expected_entity_ids` · `expected_relation_ids` · `expected_evidence_ids` ·
-`expected_source_chunk_ids` · `expected_facts` · `safety_assertions` 를 가지며,
-`scripts/evaluation/check_golden_set.py` 가 ID가 실제 코퍼스에 있는지, 그래프 체인이 노드 순서대로
-이어지는지, 검수 원본(`team_candidates/reviewed_*.jsonl`)과 갈라지지 않았는지 검사합니다.
-
-### 7.2 검색 경로 테스트 (라우팅 + fallback)
-
-| 지표 | 초기 | 최종 |
-|---|---:|---:|
-| 전체 라우팅 정확도 | 24/67 (35.82%) | **62/67 (92.54%)** |
-| Multi-hop 라우팅 일치 | 3/17 (17.65%) | **17/17 (100%)** |
-
-- 초기에는 67문항 중 43문항에서 기대 경로와 실제 라우팅이 달랐습니다. 관계 조회 여부·설명 필요성·
-  세부 조건 조합으로 분류 규칙을 재구성해 해결했습니다(문항 ID·Gold 경로는 규칙에 쓰지 않음).
-- **fallback 기록** — 구조 근거 부족 또는 인용 검증 `PARTIAL` 이면 `retry` 노드가 경로를 **HYBRID로 전환**해
-  1회 재검색합니다. 경로 이동은 `route_path`, 시도별 결과는 `attemps` 에 남습니다.
-  재시도 후에도 실패하면 보류(`WITHHELD`)합니다.
-
-### 7.3 벡터 기준선 vs 하이브리드 검색 비교
-
-| 경로 | 문항 수 | 초기 Hit@10 | 최종 Hit@10 | 변화 |
-|---|---:|---:|---:|---|
-| VECTOR (기준선) | 19 | 15/19 (78.95%) | 15/19 (78.95%) | 유지 |
-| GRAPH | 21 | 1/21 (4.76%) | **9/21 (42.86%)** | +38.10%p |
-| HYBRID | 17 | 3/17 (17.65%) | **9/17 (52.94%)** | +35.29%p |
-| 통합 Multi-hop 완전 성공 | 17 | 0/17 (0%) | **9/17 (52.94%)** | +52.94%p |
-
-**그래프 결합으로 달라진 점** — 벡터 단독 검색은 청크 하나를 잘 찾지만, "등록 약제 + 사용 조건"처럼
-두 관계를 거쳐야 하는 질문에서는 필요한 근거 조합을 모으지 못했습니다. 그래프 경로 탐색을 붙인 뒤
-Multi-hop 완전 성공이 0/17 → 9/17이 되었고, 답변에 **거쳐 간 관계 경로와 관계별 원문**을 함께 붙일 수 있게 됐습니다.
-
-**측정 설정** — GRAPH 후보 수 30(기본값), Hit@10. 후보 수를 50·100으로 늘리면 완전 경로 후보 회수는
-10/17 → 12/17 → 16/17로 늘지만 Top-10 완전 성공은 7/17 → 6/17 → 4/17로 떨어져 **채택하지 않고 롤백**했습니다.
-기본 설정 평균 검색 시간은 GRAPH 약 692ms, HYBRID 약 1,036ms입니다(측정 시점 환경 영향 있음).
-
-상세: **[Multi-hop 검색 개선 리포트](docs/multihop-retrieval-report.md)**
-
-### 7.4 VECTOR 검색 진단과 리랭커 실험 (오프라인)
-
-Hit@10 실패 4문항(`GS039` · `GS045` · `GS056` · `GS065`)을 진단한 결과 정답 청크·임베딩·인덱스 상태는
-모두 정상이었고(1024차원, 인덱스 ONLINE), 문제는 **순위**와 **ANN 후보 누락**이었습니다.
-
-| 지표 | 초기 VECTOR | Top-30 + Reranker | 동점 처리 후처리 실험 |
-|---|---:|---:|---:|
-| Hit@1 | 10/19 (52.63%) | **13/19 (68.42%)** | 13/19 (68.42%) |
-| Hit@3 | 13/19 (68.42%) | **15/19 (78.95%)** | 15/19 (78.95%) |
-| Hit@5 | 14/19 (73.68%) | **16/19 (84.21%)** | **17/19 (89.47%)** |
-| Hit@10 | 15/19 (78.95%) | **17/19 (89.47%)** | 17/19 (89.47%) |
-
-- Top-30은 Top-50과 적중률이 같으면서 문항당 평균 CPU 추론을 27.35초 → 20.35초로 줄였습니다.
-- **이 리랭커와 동점 처리는 오프라인 실험이며, 서비스 검색기에는 적용하지 않았습니다.**
-  위 수치를 통합 서비스 성능으로 읽으면 안 됩니다.
-
-상세: **[VECTOR 검색 최적화 리포트](docs/vector-search-optimization-report.md)**
-
-### 7.5 RAGAS 품질 평가
-
-**측정 상태: 미완료 (재측정 대기)**
-
-RAGAS 실행 경로와 평가 조건은 아래와 같이 고정해 두었습니다.
-
-| 항목 | 설정 |
-|---|---|
-| 실행 스크립트 | `scripts/evaluation/evaluate_integrated_ragas.py` |
-| 대상 | 실제 Supervisor 파이프라인 |
-| 표본 | 67문항 중 REJECT 10문항을 제외한 **57문항** |
-| Top-K | 5 |
-| 평가 모델 | `OPENAI_EVAL_MODEL` (기본 `gpt-4.1`) |
-| 임베딩 | `text-embedding-3-small` |
-| 측정 지표 | Faithfulness · Answer Relevancy · Answer Correctness · Context Precision / Recall / Relevance |
-
-```bash
-uv run python -m scripts.evaluation.evaluate_integrated_ragas --top-k 5
-```
-
-저장소에 남아 있는 측정 결과(`data/evaluation/integrated_ragas/`)는 **§7.3의 검색 개선을 반영하기 전에**
-실행한 값입니다. 라우팅 24/67 → 62/67, GRAPH Hit@10 1/21 → 9/21, HYBRID 3/17 → 9/17로 검색이 달라졌으므로
-그 수치는 현재 시스템의 품질이 아닙니다. 개선 후 재측정을 수행하기 전까지는 **RAGAS 점수를 이 문서에 성능으로
-제시하지 않습니다.**
-
----
-
-## 8. 상세 산출물
+## 7. 상세 산출물
 
 - 📄 [GraphRAG Multi-hop 검색 초기 이슈 및 최종 개선 결과](docs/multihop-retrieval-report.md)
 - 📄 [VECTOR 검색 초기 이슈 및 최적화 결과](docs/vector-search-optimization-report.md)
@@ -520,17 +422,17 @@ uv run python -m scripts.evaluation.evaluate_integrated_ragas --top-k 5
 
 ---
 
-## 9. 팀원 소개
+## 8. 팀원 소개
 
 > 🚧 추후 작성 예정
 
 | 이름 | 역할 | 담당 영역 | GitHub |
 |---|---|---|---|
-| | | | |
-| | | | |
-| | | | |
-| | | | |
-| | | | |
+| 백관민 | | | |
+| 조자룡 | | | |
+| 김유건 | | | |
+| 현유진 | | | |
+| 김수민 | 팀장 | | |
 
 ---
 

@@ -118,8 +118,10 @@ def collect_case(case: dict[str, Any], langfuse: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     error: dict[str, str] | None = None
 
+    # langfuse 4.x 에는 "trace" observation 타입이 없다. 루트 span 이 그대로 trace 가 되고,
+    # 이 span 의 metadata 가 trace metadata 로 올라간다.
     with langfuse.start_as_current_observation(
-        as_type="trace",
+        as_type="span",
         name=TRACE_NAME,
         input=case["question"],
         metadata={
@@ -241,7 +243,8 @@ def collect_case(case: dict[str, Any], langfuse: Any) -> dict[str, Any]:
     return {
         "question_id": case["question_id"],
         "scenario": case["scenario"],
-        "trace_id": getattr(trace, "id", None),
+        "trace_id": getattr(trace, "trace_id", None),
+        "root_span_id": getattr(trace, "id", None),
         "visited_nodes": visited,
         "final_status": result.get("final_status", "ERROR"),
         "latency_ms": latency_ms,
@@ -257,6 +260,24 @@ def main() -> None:
 
     load_dotenv(PROJECT_ROOT / ".env")
     langfuse = get_client()
+
+    # 키가 없거나 틀려도 SDK 는 예외를 던지지 않고 전송만 조용히 실패한다.
+    # 그대로 두면 Langfuse 에 한 건도 안 들어간 실행을 "수집 완료"로 착각하므로 먼저 끊는다.
+    try:
+        authenticated = langfuse.auth_check()
+    except Exception as exc:  # 네트워크·주소 오류도 같은 자리에서 알린다.
+        raise SystemExit(
+            f"Langfuse 인증 확인에 실패했습니다({type(exc).__name__}: {str(exc)[:200]}). "
+            f"{PROJECT_ROOT / '.env'} 의 LANGFUSE_BASE_URL 을 확인하세요."
+        ) from exc
+    if not authenticated:
+        raise SystemExit(
+            "Langfuse 인증이 거부되었습니다. "
+            f"{PROJECT_ROOT / '.env'} 의 LANGFUSE_PUBLIC_KEY·LANGFUSE_SECRET_KEY 를 확인하세요."
+        )
+    base_url = os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+    print(f"Langfuse 인증 확인: {base_url}", flush=True)
+
     rows = [collect_case(case, langfuse) for case in load_cases(args.golden)]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
