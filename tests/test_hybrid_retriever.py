@@ -39,11 +39,56 @@ def test_merge_results_reorders_by_hybrid_score_and_preserves_evidence():
     low_confidence_graph.metadata["confidence"] = 0.2
     high_score_vector = _vector_result("CHK_HIGH")
 
-    results = merge_results([low_confidence_graph], [high_score_vector])
+    results = merge_results([low_confidence_graph], [high_score_vector], graph_weight=1.0)
 
     assert results[0].source == "vector"
     assert results[0].chunk_ids == ["CHK_HIGH"]
     assert "hybrid_score" in results[0].metadata
+
+
+def test_graph_weight_changes_rrf_ranking_without_reserving_top_positions():
+    graph = [
+        SearchResult(source="graph", text=f"graph {rank}", path=["A", str(rank)],
+                     metadata={"node_ids": ["A", str(rank)], "relation_ids": [f"R{rank}"]})
+        for rank in range(1, 11)
+    ]
+    vector = [SearchResult(source="vector", text="vector first", score=0.9, chunk_id="C1")]
+
+    baseline = merge_results(graph, vector, limit=10, graph_weight=1.0)
+    weighted = merge_results(graph, vector, limit=10, graph_weight=1.1)
+
+    assert baseline[0].source == "vector"
+    assert weighted[0].source == "graph"
+    assert any(result.source == "vector" for result in weighted)
+    assert sum(result.source == "graph" for result in weighted) < len(graph)
+
+
+def test_merge_results_rejects_nonpositive_rrf_weight():
+    with pytest.raises(ValueError, match="RRF weights"):
+        merge_results([], [], graph_weight=0)
+
+
+def test_merge_results_uses_query_relevance_for_graph_path_ranking():
+    irrelevant = SearchResult(
+        source="graph", text="관계 경로", path=["A", "B"],
+        path_nodes=[{"entity_id": "A", "name": "토마토", "entity_type": "Crop"}],
+        relation_types=["HAS_DISEASE"],
+        metadata={"node_ids": ["A", "B"], "relation_ids": ["R1"]},
+    )
+    relevant = SearchResult(
+        source="graph", text="관계 경로", path=["C", "D"],
+        path_nodes=[{"entity_id": "C", "name": "양파", "entity_type": "Crop"}],
+        relation_types=["HAS_REGISTERED_PESTICIDE_USE"],
+        metadata={"node_ids": ["C", "D"], "relation_ids": ["R2"]},
+    )
+
+    results = merge_results(
+        [irrelevant, relevant], [], limit=2, graph_weight=1.0,
+        query="양파 등록 농약 사용",
+    )
+
+    assert results[0].path == ["C", "D"]
+    assert results[0].metadata["query_relevance"] > results[1].metadata["query_relevance"]
 
 
 def test_merge_results_keeps_vector_visible_when_graph_fills_result_limit():

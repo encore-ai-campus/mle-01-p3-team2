@@ -231,6 +231,10 @@ def build_supervisor(
             "initial_route_reason": decision.reason,
             "crop": decision.crop,
             "max_hops": decision.max_hops,
+            "entities": list(decision.entities),
+            "relation_types": list(decision.relation_types),
+            "needs_official_evidence": decision.needs_official_evidence,
+            "route_confidence": decision.confidence,
             "warnings": list(decision.warnings),
 
             # 최초 검색은 사용자 질문 그대로 실행
@@ -263,12 +267,16 @@ def build_supervisor(
         )
         crop = state.get("crop")
         max_hops = state.get("max_hops", 2)
+        relation_types = state.get("relation_types") or None
+        entity_names = state.get("entities") or None
 
         if route == "GRAPH":
             results = graph_search_fn(
                 question,
                 crop=crop,
                 max_hops=max_hops,
+                relation_types=relation_types,
+                entity_names=entity_names,
                 limit=result_limit,
             )
 
@@ -285,6 +293,8 @@ def build_supervisor(
                 vector_search_fn=vector_search_fn,
                 crop=crop,
                 max_hops=max_hops,
+                relation_types=relation_types,
+                entity_names=entity_names,
                 limit=result_limit,
             )
 

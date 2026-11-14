@@ -7,6 +7,8 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from functools import partial
+import math
+import re
 from typing import Any
 
 from .graph_retriever import GraphRetriever, graph_search
@@ -16,8 +18,51 @@ from .vector_retriever import VectorIndex, vector_search
 
 # Reciprocal Rank Fusion 설정
 RRF_K = 60
-GRAPH_WEIGHT = 1.0
+GRAPH_WEIGHT = 1.1
 VECTOR_WEIGHT = 1.0
+QUERY_RELEVANCE_WEIGHT = 0.002
+
+_QUERY_STOP_WORDS = {
+    "무엇", "무엇인가", "어떤", "어떻게", "알려줘", "알려주세요", "대해", "대한",
+    "에서", "으로", "에게", "하는", "하나요", "인가요", "있나요", "그리고",
+    "경우", "관련", "방법", "정보", "것은", "것이", "있는", "하였을",
+}
+
+_RELATION_QUERY_TERMS = {
+    "HAS_REGISTERED_PESTICIDE_USE": ("농약", "등록", "사용", "품목", "상표"),
+    "CONTROLS_TARGET": ("방제", "방제할", "대상", "효과", "잡는"),
+    "HAS_DISEASE": ("병", "병해", "병해충", "발생"),
+    "HAS_PEST": ("해충", "병해충", "발생", "방제"),
+    "RECOMMENDED_FOR": ("추천", "적합", "사용", "조건"),
+}
+
+
+def _query_terms(text: str) -> set[str]:
+    return {
+        token.casefold() for token in re.findall(r"[가-힣A-Za-z0-9]+", text)
+        if len(token) > 1 and token.casefold() not in _QUERY_STOP_WORDS
+    }
+
+
+def _query_relevance(query: str | None, result: SearchResult) -> float:
+    """Return lexical query coverage from result text and graph path labels."""
+    if not query:
+        return 0.0
+    terms = _query_terms(query)
+    if not terms:
+        return 0.0
+
+    labels: list[str] = [result.text]
+    labels.extend(str(node.get("name", "")) for node in (result.path_nodes or []))
+    relations = list(result.relation_types or [])
+    relations.extend(str(edge.get("relation_type", "")) for edge in (result.path_edges or []))
+    for relation in relations:
+        labels.extend(_RELATION_QUERY_TERMS.get(relation, ()))
+    # A graph hit may carry the matching original chunk text as vector support.
+    for hit in result.metadata.get("matched_vector_hits", []):
+        labels.append(str(hit.get("text", "")))
+    covered = set().union(*(_query_terms(label) for label in labels))
+    return len(terms & covered) / len(terms)
 
 
 def _ids(
@@ -160,11 +205,18 @@ def merge_results(
     vector_results: list[SearchResult],
     *,
     limit: int = 10,
+    graph_weight: float = GRAPH_WEIGHT,
+    vector_weight: float = VECTOR_WEIGHT,
+    query: str | None = None,
 ) -> list[SearchResult]:
     """Graph 경로와 Vector 근거를 병합하고 중복을 제거합니다."""
 
     if limit < 1:
         raise ValueError("limit은 양수여야 합니다.")
+
+    if (not math.isfinite(graph_weight) or not math.isfinite(vector_weight)
+            or graph_weight <= 0 or vector_weight <= 0):
+        raise ValueError("RRF weights must be finite positive numbers")
 
     merged: list[SearchResult] = []
 
@@ -290,7 +342,7 @@ def merge_results(
 
         vector_score = _rrf_score(
             rank,
-            VECTOR_WEIGHT,
+            vector_weight,
         )
 
         if matches:
@@ -342,12 +394,13 @@ def merge_results(
         if index in graph_ranks:
             graph_score = _rrf_score(
                 graph_ranks[index],
-                GRAPH_WEIGHT,
+                graph_weight,
             )
 
         vector_score = vector_scores.get(index, 0.0)
 
-        hybrid_score = graph_score + vector_score
+        relevance = _query_relevance(query, result)
+        hybrid_score = graph_score + vector_score + QUERY_RELEVANCE_WEIGHT * relevance
 
         ranked.append(
             replace(
@@ -356,6 +409,7 @@ def merge_results(
                     **result.metadata,
                     "graph_rrf_score": graph_score,
                     "vector_rrf_score": vector_score,
+                    "query_relevance": relevance,
                     "hybrid_score": hybrid_score,
                 },
             )
@@ -464,9 +518,12 @@ def hybrid_search(
     crop: str | None = None,
     max_hops: int = 2,
     relation_types: Sequence[str] | None = None,
+    entity_names: Sequence[str] | None = None,
     graph_limit: int = 10,
     vector_limit: int = 10,
     limit: int = 10,
+    graph_weight: float = GRAPH_WEIGHT,
+    vector_weight: float = VECTOR_WEIGHT,
 ) -> list[SearchResult]:
     """Graph와 Vector를 검색한 뒤 결과를 병합합니다."""
 
@@ -512,6 +569,8 @@ def hybrid_search(
 
     if relation_types is not None:
         graph_kwargs["relation_types"] = relation_types
+    if entity_names is not None:
+        graph_kwargs["entity_names"] = entity_names
 
     graph_results = graph_search_fn(
         question,
@@ -533,4 +592,7 @@ def hybrid_search(
         graph_results,
         vector_results,
         limit=limit,
+        graph_weight=graph_weight,
+        vector_weight=vector_weight,
+        query=question,
     )

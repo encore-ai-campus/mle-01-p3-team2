@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from src.retrievers.router import JevQuestionRouter, QuestionRouter
 
 
@@ -38,6 +40,39 @@ def test_router_returns_graph_decision_without_running_retriever():
 def test_jev_router_falls_back_to_rules_without_classifier():
     decision = JevQuestionRouter().route_query("마늘 품종별 적합 지역은 어디인가?")
     assert decision.route == "GRAPH"
+
+
+def test_jev_router_uses_llm_only_for_graph_search_conditions():
+    class Classifier:
+        def invoke(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                choices={"route": SimpleNamespace(choice="GRAPH")}
+            )
+
+    class Analyzer:
+        def __init__(self):
+            self.questions = []
+
+        def analyze(self, question):
+            self.questions.append(question)
+            return SimpleNamespace(
+                crop="양파",
+                entities=["노균병"],
+                relation_types=["AFFECTED_BY_DISEASE", "방제"],
+                max_hops=2,
+                needs_official_evidence=True,
+            )
+
+    analyzer = Analyzer()
+    decision = JevQuestionRouter(Classifier(), analyzer).route_query(
+        "양파 노균병에 등록된 약제는 무엇인가요?"
+    )
+
+    assert decision.route == "GRAPH"
+    assert decision.crop == "양파"
+    assert decision.relation_types == ["AFFECTED_BY_DISEASE"]
+    assert "일부 관계 타입" in decision.warnings[0]
+    assert analyzer.questions
 
 
 def test_scope_gate_rejects_question_without_domain_signal():
