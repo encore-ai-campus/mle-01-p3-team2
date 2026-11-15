@@ -135,6 +135,13 @@ class QuestionRouter:
         r"(?:병|병해|병해충|해충|품종|작물|약제|농약)(?:은|는|이|가|에는|으로는)?\s*"
         r"(?:무엇|뭐|무슨|어떤\s*(?:것|게|거))"
     )
+    # "등록된 약제", "등록 농약"처럼 공식 등록 기준을 묻는 질문. 등록 사용 기준은
+    # 청크 본문이 아니라 Crop→PesticideUse→대상 관계에 들어 있어, 원문 검색만
+    # 하면 근거를 찾지 못한다(GS020).
+    REGISTERED_USE_PATTERN = re.compile(
+        r"등록(?:된|되어\s*있는|\s*된)?\s*(?:약제|농약|살충제|살균제|제초제)"
+        r"|(?:약제|농약|살충제|살균제|제초제)\s*(?:의)?\s*등록"
+    )
 
     OFFICIAL_NUMERIC_TERMS = (
         "농약", "비료", "희석", "배율", "사용량", "안전사용", "수확 전",
@@ -343,6 +350,12 @@ class JevQuestionRouter(QuestionRouter):
                 route = "HYBRID"
                 upgraded_reason = (
                     "식별형 질문이라 원문 검색에 그래프 관계 탐색을 더했습니다."
+                )
+            elif route == "VECTOR" and self.REGISTERED_USE_PATTERN.search(question):
+                # 등록 약제·사용 기준은 그래프의 등록 사용 관계에만 있다.
+                route = "HYBRID"
+                upgraded_reason = (
+                    "등록 약제 사용 기준 질문이라 원문 검색에 그래프 관계 탐색을 더했습니다."
                 )
             fallback = super().route_query(question)
             analysis = None

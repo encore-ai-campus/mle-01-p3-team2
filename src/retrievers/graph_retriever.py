@@ -85,6 +85,173 @@ def _query_terms(question: str) -> list[str]:
     return sorted(terms, key=lambda value: (-len(value), value))[:32]
 
 
+_NON_WORD = re.compile(r"[^가-힣a-z0-9]")
+
+
+def _normalize(text: Any) -> str:
+    return _NON_WORD.sub("", str(text or "").lower())
+
+
+# 질문에 이름이 직접 등장할 때만 쓰는 식별 속성입니다. 작물명은 같은 작물의
+# 후보들을 구별하지 못하므로 가중치를 낮게 둡니다.
+_IDENTITY_NAME_FIELDS = (
+    "product", "brand", "active_ingredient_english", "source_variety_name",
+    "target_name", "formulation", "company",
+)
+_ALIAS_NAME_FIELDS = ("aliases", "synonyms", "_variants", "classification_paths")
+_CROP_NAME_FIELDS = ("crop", "canonical_crop")
+# 완전 일치 > 별칭 일치 > 부분 일치. 후보를 제거하지 않고 재랭킹 보너스로만 씁니다.
+_NAME_MATCH_EXACT = 6.0
+_NAME_MATCH_ALIAS = 4.0
+_NAME_MATCH_PARTIAL = 2.0
+_NAME_MATCH_CROP = 2.0
+
+# 질문이 요구한 농약 사용 속성별 가중치. 존재하면 가산, 없으면 감산합니다.
+_USE_FIELD_WEIGHTS = {
+    "use_timing": 2.0,
+    "use_count": 2.0,
+    "dilution": 2.0,
+    "application_method": 1.5,
+    "registration_no": 1.0,
+    "product": 1.0,
+    "brand": 1.0,
+}
+_USE_FIELD_MISSING_RATIO = 0.75
+_USE_FIELD_COMPLETE_BONUS = 2.0
+_EMPTY_ATTRIBUTE_VALUES = {"", "-", "없음", "해당 없음", "none", "null"}
+
+# 질문에 실제 값이 적힌 경우에만 비교합니다. Gold 값은 쓰지 않습니다.
+_TIMING_PHRASES = (
+    "월동 후", "월동후", "발생 초기", "발생초기", "발병 초기", "발병초기",
+    "생육기", "정식 전", "정식전", "파종 전", "파종전", "수확 전", "수확전",
+    "경엽 처리", "경엽처리", "토양 혼화", "토양혼화",
+)
+_CONDITION_MATCH_BONUS = 3.0
+_CONDITION_MISMATCH_PENALTY = -1.0
+
+
+def _attribute_is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return str(value).strip().lower() not in _EMPTY_ATTRIBUTE_VALUES
+
+
+def _attribute_values(attributes: Mapping[str, Any], fields: Sequence[str]) -> list[str]:
+    values: list[str] = []
+    for field in fields:
+        value = attributes.get(field)
+        if isinstance(value, (list, tuple, set)):
+            values.extend(str(item) for item in value if item is not None)
+        elif _attribute_is_present(value):
+            values.append(str(value))
+    return values
+
+
+def _name_match_bonus(
+    question_norm: str,
+    entity_terms: Sequence[str],
+    node_name: str,
+    attributes: Mapping[str, Any],
+) -> float:
+    """제품·상표·유효성분·품종명이 질문에 직접 등장할 때만 주는 재랭킹 보너스."""
+    identity = [node_name, *_attribute_values(attributes, _IDENTITY_NAME_FIELDS)]
+    aliases = _attribute_values(attributes, _ALIAS_NAME_FIELDS)
+    term_norms = [
+        normalized for normalized in (_normalize(term) for term in entity_terms)
+        if len(normalized) >= 3
+    ]
+
+    best = 0.0
+    for value in identity:
+        value_norm = _normalize(value)
+        if len(value_norm) < 3:
+            continue
+        if value_norm in question_norm:
+            best = max(best, _NAME_MATCH_EXACT)
+        elif any(term in value_norm for term in term_norms):
+            best = max(best, _NAME_MATCH_PARTIAL)
+    if best < _NAME_MATCH_EXACT:
+        for value in aliases:
+            value_norm = _normalize(value)
+            if len(value_norm) >= 3 and value_norm in question_norm:
+                best = max(best, _NAME_MATCH_ALIAS)
+
+    for value in _attribute_values(attributes, _CROP_NAME_FIELDS):
+        value_norm = _normalize(value)
+        if len(value_norm) >= 2 and value_norm in question_norm:
+            best += _NAME_MATCH_CROP
+            break
+    return best
+
+
+def _requested_condition_values(question: str) -> dict[str, Any]:
+    """질문에 적힌 사용 조건 값만 뽑습니다(Gold 값 사용 금지)."""
+    requested: dict[str, Any] = {}
+    dilution = re.search(r"(\d{2,5})\s*배", question)
+    if dilution:
+        requested["dilution"] = int(dilution.group(1))
+    harvest = re.search(r"수확\s*(\d+)\s*일\s*전", question)
+    if harvest:
+        requested["harvest_days"] = int(harvest.group(1))
+    interval = re.search(r"(\d+)\s*일\s*간격", question)
+    if interval:
+        requested["interval_days"] = int(interval.group(1))
+    count = re.search(r"(\d+)\s*회", question)
+    if count:
+        requested["use_count"] = int(count.group(1))
+    phrases = [phrase for phrase in _TIMING_PHRASES if phrase in question]
+    if phrases:
+        requested["timing_phrases"] = phrases
+    return requested
+
+
+def _condition_value_score(
+    requested: Mapping[str, Any], attributes: Mapping[str, Any]
+) -> float:
+    """질문에 적힌 값과 경로의 사용 기준 속성값을 비교합니다."""
+    if not requested:
+        return 0.0
+    score = 0.0
+    timing = _normalize(attributes.get("use_timing"))
+    method = _normalize(attributes.get("application_method"))
+
+    def numeric(value: Any) -> int | None:
+        digits = re.search(r"\d+", str(value or ""))
+        return int(digits.group(0)) if digits else None
+
+    for field in ("dilution", "use_count"):
+        if field not in requested:
+            continue
+        actual = numeric(attributes.get(field))
+        if actual is None:
+            continue
+        score += (
+            _CONDITION_MATCH_BONUS if actual == requested[field]
+            else _CONDITION_MISMATCH_PENALTY
+        )
+    if "harvest_days" in requested and timing:
+        wanted = _normalize(f"수확{requested['harvest_days']}일전")
+        score += (
+            _CONDITION_MATCH_BONUS if wanted in timing
+            else _CONDITION_MISMATCH_PENALTY
+        )
+    if "interval_days" in requested and method:
+        wanted = _normalize(f"{requested['interval_days']}일간격")
+        score += (
+            _CONDITION_MATCH_BONUS if wanted in method
+            else _CONDITION_MISMATCH_PENALTY
+        )
+    # 표현이 다양해 불일치 감산 없이 일치만 가산합니다.
+    for phrase in requested.get("timing_phrases", ()):
+        phrase_norm = _normalize(phrase)
+        if phrase_norm and (phrase_norm in timing or phrase_norm in method):
+            score += _CONDITION_MATCH_BONUS
+            break
+    return score
+
+
 def _result_relevance(
     result: SearchResult,
     question: str,
@@ -110,15 +277,18 @@ def _path_relevance_score(
         term for term in terms
         if term not in _ENTITY_STOPWORDS and len(term) >= 2
     ]
-    normalized = lambda text: re.sub(r"[^가-힣a-z0-9]", "", text.lower())
+    normalized = _normalize
+    question_norm = normalized(question)
     score = 0.0
     attribute_keys = {
         "aliases", "synonyms", "brand", "product", "target_name", "crop",
-        "canonical_crop", "active_ingredient", "variety", "variety_name",
-        "region", "growth_stage", "use_timing", "application_method",
+        "canonical_crop", "active_ingredient_english", "source_variety_name",
+        "_variants", "classification_paths", "cultivation_type", "formulation",
+        "company", "region", "growth_stage", "use_timing", "application_method",
     }
     entity_coverage: set[str] = set()
     parsed_attributes: list[Mapping[str, Any]] = []
+    name_match_bonus = 0.0
     for index, node in enumerate(path_nodes):
         name = normalized(str(node.get("name") or ""))
         attr = node_attributes[index] if index < len(node_attributes) else {}
@@ -138,6 +308,13 @@ def _path_relevance_score(
         attr_text = " ".join(attr_values)
         attr_norm = normalized(attr_text)
         parsed_attributes.append(attr if isinstance(attr, Mapping) else {})
+        if isinstance(attr, Mapping):
+            name_match_bonus = max(
+                name_match_bonus,
+                _name_match_bonus(
+                    question_norm, entity_terms, str(node.get("name") or ""), attr
+                ),
+            )
         for term in entity_terms:
             term_norm = normalized(term)
             if not term_norm:
@@ -150,6 +327,11 @@ def _path_relevance_score(
     # path merely because generic words occur in several attributes.
     for term in entity_coverage:
         score += min(len(term), 12) * (1.25 if len(term) >= 4 else 0.6)
+
+    # 제품명·상표명·유효성분·품종명이 질문에 직접 등장하면 그 경로를 올립니다.
+    # 경로 전체에서 가장 강한 일치 한 번만 반영해 노드 수가 많은 경로가
+    # 유리해지지 않도록 합니다.
+    score += name_match_bonus
 
     # When a question asks for application details, prefer paths whose linked
     # use record actually contains those requested fields. This uses retrieved
@@ -168,14 +350,24 @@ def _path_relevance_score(
     }
     if not requested_fields and any(cue in q for cue in ("어떻게", "방법", "사용할 수")):
         requested_fields.update(("use_timing", "application_method", "use_count", "dilution"))
+    requested_values = _requested_condition_values(question)
     for index, node in enumerate(path_nodes):
         if node.get("entity_type") != "PesticideUse" or index >= len(parsed_attributes):
             continue
         attributes = parsed_attributes[index]
+        # 필드별로 가중치를 달리 두고, 요구한 필드를 모두 갖춘 기록에 완전성 가산.
+        present_count = 0
         for field in requested_fields:
-            value = attributes.get(field)
-            present = value is not None and str(value).strip().lower() not in {"", "-", "없음", "해당 없음"}
-            score += 1.5 if present else -1.5
+            weight = _USE_FIELD_WEIGHTS.get(field, 1.5)
+            if _attribute_is_present(attributes.get(field)):
+                score += weight
+                present_count += 1
+            else:
+                score -= weight * _USE_FIELD_MISSING_RATIO
+        if requested_fields and present_count == len(requested_fields):
+            score += _USE_FIELD_COMPLETE_BONUS
+        # 질문에 적힌 사용 조건 값(희석배수·횟수·간격·시기)과의 일치.
+        score += _condition_value_score(requested_values, attributes)
 
     query_intents: list[tuple[int, str]] = []
     for relation_type, cues in _RELATION_CUES.items():
@@ -867,51 +1059,65 @@ class GraphRetriever:
             )
         )
         explicit_multihop = "2홉" in question or "멀티홉" in question
-        if max_hops >= 2 and (explicit_multihop or variety_region or pesticide_target):
-            focused_types = relation_types
-            if focused_types is None and variety_region:
-                focused_types = ["HAS_VARIETY", "SUITABLE_FOR_REGION"]
-            elif focused_types is None and pesticide_target:
-                focused_types = ["HAS_REGISTERED_PESTICIDE_USE", "CONTROLS_TARGET"]
-            focused = self.search_paths(
-                start_label="Crop", **anchor_kwargs,
-                min_hops=2, max_hops=max_hops,
-                relation_types=focused_types, limit=limit,
-                question=question, candidate_limit=candidate_limit,
-            )
-            if focused:
-                self.last_search_diagnostics.update({
-                    "path_search_attempted": True,
-                    "path_candidate_count": len(focused),
-                    "failure_stage": None,
-                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
-                })
-                return focused[:limit]
-            # Relation heuristics are a preference, not a hard filter: if the
-            # graph uses an adjacent relation type, retry all types over 2..N hops.
-            broad = self.search_paths(
-                start_label="Crop", **anchor_kwargs,
-                min_hops=2, max_hops=max_hops,
-                relation_types=relation_types, limit=limit,
-                question=question, candidate_limit=candidate_limit,
-            )
-            if broad:
-                self.last_search_diagnostics.update({
-                    "path_search_attempted": True,
-                    "path_candidate_count": len(broad),
-                    "failure_stage": None,
-                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
-                })
-                return broad
+        multi_hop_intent = explicit_multihop or variety_region or pesticide_target
+        # 라우터가 약제·품종 질문에 max_hops=1을 주면 2-hop 분기에 진입조차 못 해
+        # Gold 경로가 후보에서 사라진다. 질문 의도가 다중 관계면 최소 2홉을 보장한다.
+        effective_max_hops = max(max_hops, 2) if multi_hop_intent else max_hops
+
+        if effective_max_hops >= 2 and multi_hop_intent:
+            # 관계 타입은 선호 신호이지 하드 필터가 아니다. 라우터 추정 → 도메인
+            # 기본 조합 → 타입 무제한 순으로 완화하며 2-hop 후보를 확보한다.
+            domain_types: list[str] | None = None
+            if variety_region:
+                domain_types = ["HAS_VARIETY", "SUITABLE_FOR_REGION"]
+            elif pesticide_target:
+                domain_types = ["HAS_REGISTERED_PESTICIDE_USE", "CONTROLS_TARGET"]
+
+            attempts: list[tuple[str, Sequence[str] | None]] = []
+            if relation_types is not None:
+                attempts.append(("router_relation_types", relation_types))
+            if domain_types is not None and list(domain_types) != list(relation_types or []):
+                attempts.append(("domain_relation_types", domain_types))
+            attempts.append(("unfiltered", None))
+
+            for strategy, types in attempts:
+                found = self.search_paths(
+                    start_label="Crop", **anchor_kwargs,
+                    min_hops=2, max_hops=effective_max_hops,
+                    relation_types=types, limit=limit,
+                    question=question, candidate_limit=candidate_limit,
+                )
+                if found:
+                    self.last_search_diagnostics.update({
+                        "path_search_attempted": True,
+                        "path_candidate_count": len(found),
+                        "path_search_strategy": strategy,
+                        "max_hops_used": effective_max_hops,
+                        "failure_stage": None,
+                        "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                    })
+                    return found[:limit]
 
         results = self.search_paths(
             start_label="Crop", **anchor_kwargs, min_hops=1,
-            max_hops=max_hops, relation_types=relation_types, limit=limit,
+            max_hops=effective_max_hops, relation_types=relation_types, limit=limit,
             question=question, candidate_limit=candidate_limit,
         )
+        strategy = "one_hop_router_relation_types" if results else None
+        # 시작 라벨에서 나갈 수 없는 관계 타입만 지정되면(예: Crop에 없는
+        # CONTROLS_TARGET 단독) 결과가 공집합이 된다. 필터를 버리고 한 번 더 찾는다.
+        if not results and relation_types is not None:
+            results = self.search_paths(
+                start_label="Crop", **anchor_kwargs, min_hops=1,
+                max_hops=effective_max_hops, relation_types=None, limit=limit,
+                question=question, candidate_limit=candidate_limit,
+            )
+            strategy = "one_hop_unfiltered" if results else None
         self.last_search_diagnostics.update({
             "path_search_attempted": True,
             "path_candidate_count": len(results),
+            "path_search_strategy": strategy,
+            "max_hops_used": effective_max_hops,
             "failure_stage": None if results else "path_search",
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
         })
