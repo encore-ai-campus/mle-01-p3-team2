@@ -1,0 +1,56 @@
+{
+  "total_cases": 67,
+  "successful_runs": 67,
+  "withheld_cases": 3,
+  "withheld_by_execution_decision": {
+    "None": 1,
+    "FALLBACK": 2
+  },
+  "withheld_by_execution_reason": {
+    "작물·병해충 정보가 부족합니다.": 2
+  },
+  "withheld_by_guardrail_reason": {
+    "NeMo 입력 정책에서 요청을 차단하거나 변경했습니다.": 1,
+    "작물·병해충 정보가 부족합니다.": 2
+  },
+  "error_counts": {},
+  "ragas_evaluated_cases": 57,
+  "ragas_metrics": {
+    "faithfulness": 0.8272214718101348,
+    "answer_relevancy": 0.2564053876860876,
+    "answer_correctness": 0.44994737717973043,
+    "context_precision": 0.5735551274269433,
+    "context_recall": 0.87046783625731,
+    "context_relevance": 0.9824561403508771
+  },
+  "chunk_hit_at_k": 0.5614035087719298,
+  "evidence_hit_at_k": 0.5614035087719298,
+  "structural_pass_rate": 0.9552238805970149,
+  "by_question_type": {
+    "comparison": {
+      "count": 1,
+      "structural_pass_rate": 0.0,
+      "answer_correctness": 0.07081192393602521
+    },
+    "fact": {
+      "count": 18,
+      "structural_pass_rate": 1.0,
+      "answer_correctness": 0.6394558147007023
+    },
+    "multi_hop": {
+      "count": 19,
+      "structural_pass_rate": 1.0,
+      "answer_correctness": 0.3754105782530985
+    },
+    "out_of_scope": {
+      "count": 10,
+      "structural_pass_rate": 0.9,
+      "answer_correctness": null
+    },
+    "relation": {
+      "count": 19,
+      "structural_pass_rate": 0.9473684210526315,
+      "answer_correctness": 0.36490436441511026
+    }
+  }
+}
