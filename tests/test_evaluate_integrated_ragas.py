@@ -179,3 +179,246 @@ def test_build_ragas_rows_joins_references_without_changing_run_records():
         }
     ]
     assert "reference" not in records[0]
+
+
+def test_ragas_runtime_defaults_are_safe_for_context_precision():
+    module = _module()
+
+    args = module.parse_args([])
+
+    assert args.ragas_timeout == 900
+    assert args.ragas_max_workers == 4
+    assert args.ragas_max_retries == 10
+
+
+def test_require_complete_scores_rejects_partial_metric_output():
+    module = _module()
+    complete = {name: 0.5 for name in module.RAGAS_METRICS}
+    module._require_complete_scores([{"case_id": "GS100", **complete}])
+
+    partial = {**complete, "context_precision": None}
+    try:
+        module._require_complete_scores([{"case_id": "GS101", **partial}])
+    except RuntimeError as exc:
+        assert "GS101" in str(exc)
+        assert "context_precision" in str(exc)
+    else:
+        raise AssertionError("partial RAGAS output must be rejected")
+
+
+def test_record_keeps_guardrail_and_execution_decisions():
+    """보류 원인을 레일별로 구분할 수 있는 필드를 남긴다."""
+    module = _module()
+
+    record = module.state_to_record(
+        {
+            "case_id": "GS019",
+            "question": "등록된 농약 품목은 무엇인가요?",
+            "expected_behavior": "ANSWER",
+        },
+        {
+            "initial_route": "GRAPH",
+            "route": "GRAPH",
+            "route_path": ["GRAPH"],
+            "final_status": "WITHHELD",
+            "final_answer": "작물·병해충 정보가 부족합니다.",
+            "retrieved_results": [],
+            "evidences": [],
+            "guardrail_decision": "FALLBACK",
+            "guardrail_reason": "농약 정보 조회 요청",
+            "execution_decision": "FALLBACK",
+            "execution_reason": "작물·병해충 정보가 부족합니다.",
+            "execution_records": [],
+        },
+        top_k=5,
+    )
+
+    assert record["guardrail_decision"] == "FALLBACK"
+    assert record["execution_decision"] == "FALLBACK"
+    assert record["execution_reason"] == "작물·병해충 정보가 부족합니다."
+    assert record["execution_record_count"] == 0
+
+
+def test_record_counts_listed_execution_records():
+    """목록 조회로 통과한 사례는 기록 수를 남긴다."""
+    module = _module()
+
+    record = module.state_to_record(
+        {
+            "case_id": "GS019",
+            "question": "등록된 농약 품목은 무엇인가요?",
+            "expected_behavior": "ANSWER",
+        },
+        {
+            "route_path": ["GRAPH"],
+            "final_status": "ANSWERED",
+            "final_answer": "등록 약제 목록입니다.",
+            "retrieved_results": [],
+            "evidences": [],
+            "execution_decision": "WARN",
+            "execution_records": [{"product_name": "A"}, {"product_name": "B"}],
+        },
+        top_k=5,
+    )
+
+    assert record["execution_decision"] == "WARN"
+    assert record["execution_record_count"] == 2
+
+
+def test_error_record_shares_the_guardrail_schema():
+    """실행 실패 레코드도 같은 필드를 갖는다."""
+    module = _module()
+
+    app = _RecordingApp(error=RuntimeError("실패"))
+    records = module.run_supervisor_cases(
+        app,
+        [{"case_id": "GS999", "question": "질문"}],
+        top_k=5,
+    )
+
+    assert records[0]["execution_record_count"] == 0
+    assert records[0]["guardrail_decision"] is None
+    assert set(records[0]) == set(
+        module.state_to_record(
+            {"case_id": "GS999", "question": "질문"},
+            {
+                "route_path": [],
+                "final_status": "ANSWERED",
+                "final_answer": "답변",
+                "retrieved_results": [],
+                "evidences": [],
+            },
+            top_k=5,
+        )
+    )
+
+
+def test_summary_breaks_down_withheld_reasons():
+    """요약에 레일별 보류 집계가 포함된다."""
+    module = _module()
+
+    summary = module.summarize([
+        {
+            "case_id": "GS019",
+            "question_type": "lookup",
+            "run_status": "OK",
+            "final_status": "WITHHELD",
+            "execution_decision": "FALLBACK",
+            "execution_reason": "작물·병해충 정보가 부족합니다.",
+            "guardrail_reason": "농약 정보 조회 요청",
+            "structural_pass": False,
+        },
+        {
+            "case_id": "GS036",
+            "question_type": "lookup",
+            "run_status": "OK",
+            "final_status": "WITHHELD",
+            "execution_decision": "WARN",
+            "guardrail_reason": "LLM 검증을 위한 API 키가 없습니다.",
+            "structural_pass": False,
+        },
+        {
+            "case_id": "GS020",
+            "question_type": "lookup",
+            "run_status": "OK",
+            "final_status": "ANSWERED",
+            "execution_decision": "WARN",
+            "structural_pass": True,
+        },
+    ])
+
+    assert summary["withheld_cases"] == 2
+    assert summary["withheld_by_execution_decision"] == {
+        "FALLBACK": 1,
+        "WARN": 1,
+    }
+    assert summary["withheld_by_execution_reason"] == {
+        "작물·병해충 정보가 부족합니다.": 1,
+    }
+    assert (
+        summary["withheld_by_guardrail_reason"][
+            "LLM 검증을 위한 API 키가 없습니다."
+        ]
+        == 1
+    )
+
+
+def test_case_ids_filter_selects_requested_cases(tmp_path, monkeypatch):
+    """--case-ids는 지정한 케이스만 실행 대상으로 남긴다."""
+    import json as _json
+
+    from scripts.evaluation import evaluate_integrated_ragas as module
+
+    golden = tmp_path / "golden.jsonl"
+    golden.write_text(
+        "\n".join(
+            _json.dumps(
+                {"case_id": case_id, "question": "q", "status": "READY"},
+                ensure_ascii=False,
+            )
+            for case_id in ("GS001", "GS002", "GS003")
+        ),
+        encoding="utf-8",
+    )
+
+    raw = tmp_path / "out" / "supervisor_runs.jsonl"
+    raw.parent.mkdir(parents=True)
+    raw.write_text("", encoding="utf-8")
+
+    seen: dict[str, list[str]] = {}
+
+    def fake_read_jsonl(path):
+        rows = [
+            _json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        return rows
+
+    monkeypatch.setattr(module, "read_jsonl", fake_read_jsonl)
+
+    def fake_run(app, cases, *, top_k, on_record=None):
+        seen["case_ids"] = [case["case_id"] for case in cases]
+        return []
+
+    monkeypatch.setattr(module, "run_supervisor_cases", fake_run)
+    monkeypatch.setattr(
+        "scripts.run_supervisor.build_app",
+        lambda: (object(), type("D", (), {"close": lambda self: None})()),
+    )
+
+    exit_code = module.main([
+        "--golden-set", str(golden),
+        "--output-dir", str(raw.parent),
+        "--stage", "collect",
+        "--case-ids", "GS003, GS001",
+    ])
+
+    assert exit_code == 0
+    assert seen["case_ids"] == ["GS001", "GS003"]
+
+
+def test_case_ids_filter_rejects_unknown_case(tmp_path, monkeypatch):
+    """Golden Set에 없는 ID를 주면 조용히 건너뛰지 않고 알린다."""
+    import json as _json
+
+    import pytest as _pytest
+
+    from scripts.evaluation import evaluate_integrated_ragas as module
+
+    golden = tmp_path / "golden.jsonl"
+    golden.write_text(
+        _json.dumps(
+            {"case_id": "GS001", "question": "q", "status": "READY"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with _pytest.raises(ValueError, match="GS999"):
+        module.main([
+            "--golden-set", str(golden),
+            "--output-dir", str(tmp_path / "out"),
+            "--stage", "collect",
+            "--case-ids", "GS999",
+        ])
