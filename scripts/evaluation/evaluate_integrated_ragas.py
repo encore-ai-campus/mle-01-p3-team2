@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import os
+import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -15,6 +16,12 @@ from dotenv import load_dotenv
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# `python -m scripts.evaluation...`과 `python scripts/evaluation/...`을
+# 모두 지원하려면 루트가 import 경로에 있어야 한다.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 load_dotenv(PROJECT_ROOT / ".env")
 
 
@@ -104,8 +111,27 @@ def state_to_record(
         "retry_count": state.get("retry_count", 0),
         "final_status": final_status,
         "response": state.get("final_answer") or "",
+
+        # 보류·차단된 답변의 원문. 어떤 주장이 걸렸는지 재실행 없이
+        # 확인하기 위해 남긴다.
+        "draft_answer": state.get("answer") or "",
         "citation_status": state.get("citation_status"),
         "evidence_status": state.get("evidence_status"),
+        # 보류·차단이 어느 레일에서 났는지 결과만 보고 구분하기 위한 필드
+        "guardrail_decision": state.get("guardrail_decision"),
+        "guardrail_reason": state.get("guardrail_reason"),
+        "judge_severity": (
+            (state.get("guardrail_details") or {}).get("judge_severity")
+        ),
+        # 판정 사유가 어느 검증 담당인지. 범위 밖 분류는 보류로 쓰지 않는다.
+        "judge_category": (
+            (state.get("guardrail_details") or {}).get("judge_category")
+        ),
+        "execution_decision": state.get("execution_decision"),
+        "execution_reason": state.get("execution_reason"),
+        "execution_record_count": len(
+            state.get("execution_records") or []
+        ),
         "warnings": list(state.get("warnings") or []),
         "retrieved_chunk_ids": chunk_ids,
         "retrieved_evidence_ids": evidence_ids,
@@ -138,8 +164,16 @@ def _error_record(case: dict[str, Any], exc: Exception) -> dict[str, Any]:
         "retry_count": 0,
         "final_status": "ERROR",
         "response": "",
+        "draft_answer": "",
         "citation_status": None,
         "evidence_status": None,
+        "guardrail_decision": None,
+        "guardrail_reason": None,
+        "judge_severity": None,
+        "judge_category": None,
+        "execution_decision": None,
+        "execution_reason": None,
+        "execution_record_count": 0,
         "warnings": [],
         "retrieved_chunk_ids": [],
         "retrieved_evidence_ids": [],
@@ -342,9 +376,37 @@ def summarize(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     for record in records:
         by_type[str(record.get("question_type"))].append(record)
 
+    # 답변하지 못한 사례를 레일별로 모아 보류 원인을 바로 볼 수 있게 한다.
+    withheld = [
+        record
+        for record in records
+        if record.get("final_status") not in ("ANSWERED", "REJECTED")
+    ]
+
     return {
         "total_cases": len(records),
         "successful_runs": sum(record.get("run_status") == "OK" for record in records),
+        "withheld_cases": len(withheld),
+        "withheld_by_execution_decision": dict(
+            Counter(
+                str(record.get("execution_decision"))
+                for record in withheld
+            )
+        ),
+        "withheld_by_execution_reason": dict(
+            Counter(
+                str(record.get("execution_reason"))
+                for record in withheld
+                if record.get("execution_reason")
+            )
+        ),
+        "withheld_by_guardrail_reason": dict(
+            Counter(
+                str(record.get("guardrail_reason"))
+                for record in withheld
+                if record.get("guardrail_reason")
+            )
+        ),
         "error_counts": dict(Counter(record.get("error_type") for record in records if record.get("error_type"))),
         "ragas_evaluated_cases": sum(
             any(value is not None for value in (record.get("ragas") or {}).values())
@@ -376,6 +438,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--stage", choices=("all", "collect", "score"), default="all")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--case-ids",
+        default="",
+        help=(
+            "쉼표로 구분한 케이스 ID만 실행한다. 수정한 레일에 걸린 "
+            "케이스만 다시 돌려 LLM 호출 비용을 줄일 때 쓴다."
+        ),
+    )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--model", default=os.getenv("OPENAI_EVAL_MODEL", "gpt-4.1"))
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
@@ -414,6 +484,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary_path = output_dir / "ragas_summary.json"
 
     cases = [case for case in read_jsonl(golden_path) if case.get("status") == "READY"]
+
+    wanted_ids = {
+        case_id.strip()
+        for case_id in args.case_ids.split(",")
+        if case_id.strip()
+    }
+
+    if wanted_ids:
+        cases = [case for case in cases if case.get("case_id") in wanted_ids]
+
+        missing = wanted_ids - {case.get("case_id") for case in cases}
+
+        if missing:
+            raise ValueError(
+                "Golden Set에 없는 케이스 ID: "
+                + ", ".join(sorted(missing))
+            )
+
     if args.limit is not None:
         if args.limit < 1:
             raise ValueError("--limit must be a positive integer")

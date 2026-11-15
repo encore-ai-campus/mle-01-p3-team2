@@ -29,6 +29,18 @@ def test_input_classification(
     assert result.allowed is expected_allowed
 
 
+def test_gs036_registered_control_product_is_pesticide_lookup():
+    """등록 방제용 품목과 사용조건 질문은 농약 조회로 분류한다."""
+    result = classify_input(
+        "마늘에 등록된 잎마름병 방제용 품목은 무엇이며, "
+        "언제 어떤 조건으로 사용해야 하나요?"
+    )
+
+    assert result.allowed is True
+    assert result.intent == "PESTICIDE_LOOKUP"
+    assert result.pesticide_use_requested is False
+
+
 def test_dangerous_input_stops_before_retrieval():
     """위험 요청은 검색기를 호출하지 않고 종료해야 한다."""
 

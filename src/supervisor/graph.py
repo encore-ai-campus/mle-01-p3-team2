@@ -18,7 +18,11 @@ from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
 
 from .answer_agent import AnswerAgent
-from .citation_verifier import SupportChecker, verify_citations
+from .citation_verifier import (
+    SupportChecker,
+    repair_unknown_citation_ids,
+    verify_citations,
+)
 from .state import GraphState
 
 # Guardrails 연동
@@ -38,6 +42,7 @@ from src.guardrails.execution_adapter import (
 from src.guardrails.supervisor_adapter import guardrails_node
 from src.guardrails.neo4j_pesticide_lookup import (
     make_neo4j_pesticide_lookup,
+    make_neo4j_pesticide_usage_list,
 )
 
 GraphSearch = Callable[..., list[SearchResult]]
@@ -211,6 +216,7 @@ def build_supervisor(
     cited_answer_generator: CitedAnswerGenerator | None = None,
     citation_support_checker: SupportChecker | None = None,
     pesticide_lookup_fn=None,
+    pesticide_usage_list_fn=None,
     current_verifier_fn=None,
     max_retries: int = 1,
     result_limit: int = 10,
@@ -233,6 +239,12 @@ def build_supervisor(
         pesticide_lookup_fn
         if pesticide_lookup_fn is not None
         else make_neo4j_pesticide_lookup()
+    )
+    # 제품명 없는 정보 조회는 작물·병해충 기준 목록 조회로 처리합니다.
+    selected_pesticide_usage_list = (
+        pesticide_usage_list_fn
+        if pesticide_usage_list_fn is not None
+        else make_neo4j_pesticide_usage_list()
     )
     selected_hybrid = hybrid_search_fn or hybrid_search
     selected_answer_agent = AnswerAgent.from_env()
@@ -466,6 +478,10 @@ def build_supervisor(
 
         cited_answer = generate_cited_answer(
             state.get("question", ""),
+            evidences,
+        )
+        cited_answer = repair_unknown_citation_ids(
+            cited_answer,
             evidences,
         )
 
@@ -798,6 +814,7 @@ def build_supervisor(
         lambda state: execution_node(
             state,
             lookup_fn=selected_pesticide_lookup,
+            list_lookup_fn=selected_pesticide_usage_list,
             current_verifier=current_verifier_fn,
         ),
     )

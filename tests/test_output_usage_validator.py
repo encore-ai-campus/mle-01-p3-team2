@@ -190,3 +190,252 @@ def test_safe_warnings_not_blocked(
     result = check(answer, registered_record)
 
     assert result["decision"] == "PASS"
+
+
+# Neo4j 어댑터가 넘기는 실제 기록 형태.
+# 희석배수는 단위 없이 숫자만, 사용횟수·수확 전 사용시기는
+# "3회 이내", "수확 14일 전까지"처럼 문장으로 저장된다.
+@pytest.fixture
+def neo4j_record():
+    return {
+        "product_name": "아세페이트 수화제",
+        "brand": "베스탄",
+        "crop": "배추",
+        "target_pest": "배추흰나비",
+        "dilution": "1000",
+        "max_applications": "3회 이내",
+        "preharvest_interval": "수확 14일 전까지",
+    }
+
+
+def check_records(answer, records):
+    return validate_pesticide_output(
+        answer,
+        records=records,
+        pesticide_use_requested=True,
+    )
+
+
+def test_unit_free_dilution_record_is_compared(neo4j_record):
+    """단위 없이 저장된 희석배수도 대조해 통과시킨다."""
+    result = check_records(
+        "베스탄은 1000배로 희석해 살포합니다.",
+        [neo4j_record],
+    )
+
+    assert result["allowed"] is True
+    assert result["decision"] == "PASS"
+
+
+def test_unit_free_dilution_mismatch_blocked(neo4j_record):
+    """단위 없이 저장된 희석배수와 어긋나면 차단한다."""
+    result = check_records(
+        "베스탄은 2000배로 희석해 살포합니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "BLOCK"
+
+
+def test_missing_field_is_warned_not_withheld(neo4j_record):
+    """등록정보에 값이 없는 항목은 보류하지 않고 경고로 남긴다."""
+    record = {**neo4j_record, "dilution": ""}
+
+    result = check_records(
+        "베스탄은 1000배로 희석해 살포합니다.",
+        [record],
+    )
+
+    assert result["allowed"] is True
+    assert result["decision"] == "WARN"
+    assert result["unverified_fields"] == ["희석배수"]
+
+
+def test_use_count_within_limit_passes(neo4j_record):
+    """등록 상한 안의 사용횟수는 통과한다."""
+    result = check_records(
+        "베스탄은 2~3회 이내로 살포합니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "PASS"
+
+
+def test_use_count_over_limit_blocked(neo4j_record):
+    """등록 상한을 넘는 사용횟수는 차단한다."""
+    result = check_records(
+        "베스탄은 최대 4회까지 살포할 수 있습니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "BLOCK"
+
+
+def test_occurrence_count_is_not_use_count(neo4j_record):
+    """발생 횟수를 사용횟수로 오인해 차단하지 않는다."""
+    result = check_records(
+        "배추흰나비 애벌레는 한 해 5~6회 발생합니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "PASS"
+
+
+def test_shorter_preharvest_interval_blocked(neo4j_record):
+    """등록 일수보다 짧은 수확 전 사용시기는 차단한다."""
+    result = check_records(
+        "베스탄은 수확 7일 전까지 사용합니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "BLOCK"
+
+
+def test_longer_preharvest_interval_warned(neo4j_record):
+    """등록 일수보다 긴 안내는 차단하지 않고 경고로 남긴다."""
+    result = check_records(
+        "베스탄은 수확 21일 전까지 사용합니다.",
+        [neo4j_record],
+    )
+
+    assert result["allowed"] is True
+    assert result["decision"] == "WARN"
+
+
+def test_multiplier_expression_is_not_dilution(neo4j_record):
+    """'2배 증가' 같은 표현을 희석배수로 오인하지 않는다."""
+    result = check_records(
+        "방제를 하지 않으면 피해가 2배 증가합니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "PASS"
+
+
+def test_same_brand_different_products_scoped_by_item(neo4j_record):
+    """상표명을 공유하는 품목은 품목명으로 좁혀 비교한다."""
+    records = [
+        {
+            **neo4j_record,
+            "product_name": "메톨라클로르 입제",
+            "brand": "안빌",
+            "dilution": "",
+            "max_applications": "1회",
+        },
+        {
+            **neo4j_record,
+            "product_name": "에마멕틴벤조에이트 입상수화제",
+            "brand": "안빌",
+            "dilution": "",
+            "max_applications": "3회 이내",
+        },
+    ]
+
+    result = check_records(
+        "메톨라클로르 입제(안빌)은 최대 2회까지 살포할 수 있습니다.",
+        records,
+    )
+
+    assert result["decision"] == "BLOCK"
+
+
+def test_brand_only_mention_uses_brand_records(neo4j_record):
+    """품목명이 없는 줄은 상표명 기록으로 비교한다."""
+    result = check_records(
+        "베스탄은 최대 9회까지 살포할 수 있습니다.",
+        [neo4j_record],
+    )
+
+    assert result["decision"] == "BLOCK"
+
+
+# 같은 품목이 상표별로 다른 조건으로 등록된 실제 자료 구조.
+# 마늘 잎마름병의 트리플록시스트로빈 계열이 이 모양이다.
+@pytest.fixture
+def same_item_different_brands():
+    return [
+        {
+            "product_name": "트리플록시스트로빈 입상수화제",
+            "brand": "킹팜",
+            "registration_no": "46-살균-218",
+            "crop": "마늘",
+            "target_pest": "잎마름병",
+            "dilution": "4000",
+            "max_applications": "4회 이내",
+            "preharvest_interval": "수확 30일 전까지",
+        },
+        {
+            "product_name": "트리플록시스트로빈 액상수화제",
+            "brand": "헌티드",
+            "registration_no": "63-살균-71",
+            "crop": "마늘",
+            "target_pest": "잎마름병",
+            "dilution": "2000",
+            "max_applications": "3회",
+            "preharvest_interval": "수확7일전",
+        },
+    ]
+
+
+def test_each_brand_compared_to_its_own_record(
+    same_item_different_brands,
+):
+    """같은 품목이어도 상표별 등록값으로 각각 비교한다."""
+    for answer in (
+        "킹팜(트리플록시스트로빈 입상수화제, 등록번호 46-살균-218): "
+        "4000배로 희석해 수확 30일 전까지 4회 이내 살포합니다.",
+        "헌티드(트리플록시스트로빈 액상수화제, 등록번호 63-살균-71): "
+        "2000배로 희석해 수확 7일 전까지 3회 살포합니다.",
+    ):
+        result = check_records(answer, same_item_different_brands)
+
+        assert result["decision"] == "PASS", answer
+
+
+def test_other_brand_values_blocked(same_item_different_brands):
+    """다른 상표의 수치를 옮겨 쓰면 차단한다."""
+    result = check_records(
+        "킹팜(트리플록시스트로빈 입상수화제, 등록번호 46-살균-218): "
+        "2000배로 희석해 살포합니다.",
+        same_item_different_brands,
+    )
+
+    assert result["decision"] == "BLOCK"
+
+
+def test_registration_with_wrong_brand_blocked(
+    same_item_different_brands,
+):
+    """등록번호에 다른 제품의 상표를 붙이면 차단한다."""
+    result = check_records(
+        "헌티드(트리플록시스트로빈 입상수화제, 등록번호 46-살균-218): "
+        "4000배로 희석해 살포합니다.",
+        same_item_different_brands,
+    )
+
+    assert result["decision"] == "BLOCK"
+    assert "46-살균-218" in result["reason"]
+
+
+def test_listing_several_products_is_allowed(
+    same_item_different_brands,
+):
+    """여러 제품을 함께 나열한 줄은 식별자 검사로 차단하지 않는다."""
+    result = check_records(
+        "킹팜(46-살균-218)과 헌티드(63-살균-71)가 등록돼 있습니다.",
+        same_item_different_brands,
+    )
+
+    assert result["allowed"] is True
+
+
+def test_unknown_registration_number_is_not_blocked(
+    same_item_different_brands,
+):
+    """등록정보에 없는 등록번호는 식별자 검사 대상이 아니다."""
+    result = check_records(
+        "킹팜(등록번호 99-살균-999)이 있습니다.",
+        same_item_different_brands,
+    )
+
+    assert result["allowed"] is True

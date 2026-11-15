@@ -148,6 +148,35 @@ def quote_exists(citation_quote: str, source_text: str) -> bool:
     ratio = quote_match_ratio(normalized_quote, normalized_source)
     return ratio >= QUOTE_MATCH_THRESHOLD
 
+
+def repair_unknown_citation_ids(
+    answer: CitedAnswer,
+    evidences: list[Evidence],
+) -> CitedAnswer:
+    """인용문이 한 근거에만 일치할 때 존재하지 않는 ID를 교정한다."""
+
+    repaired = answer.model_copy(deep=True)
+    known_ids = {evidence.evidence_id for evidence in evidences}
+
+    for claim in repaired.claims:
+        for citation in claim.citations:
+            if citation.evidence_id in known_ids:
+                continue
+
+            matches = [
+                evidence
+                for evidence in evidences
+                if quote_exists(
+                    citation.quote,
+                    citable_text(evidence),
+                )
+            ]
+
+            if len(matches) == 1:
+                citation.evidence_id = matches[0].evidence_id
+
+    return repaired
+
 _SAFETY_KEYWORDS = (
     "농약",
     "비료",
