@@ -451,7 +451,8 @@ mle-01-p3-team2/
 
 평가셋 **67문항**(fact 18 · relation 19 · multi_hop 19 · comparison 1 · out_of_scope 10),
 평가 날짜 2026-11-14~15, 데이터 범위는 5대 작물(상추·양파·마늘·고추·배추)입니다.
-RAGAS 품질 지표는 별도 작업으로 진행 중이라 이 절에 포함하지 않았습니다.
+RAGAS 품질 지표는 §7.6에 있으며, 라우팅·인용·가드레일 수정을 모두 반영한 통합
+파이프라인 최종 실행(`data/evaluation/ragas_result/v4_final/`) 기준입니다.
 
 ### 7.1 검색 경로 판단과 fallback
 
@@ -488,17 +489,20 @@ RAGAS 품질 지표는 별도 작업으로 진행 중이라 이 절에 포함하
 
 ### 7.4 근거 부족 시 재검색·응답 보류
 
-골든셋 67문항 실행 결과입니다.
+골든셋 67문항 실행 결과입니다. 아래는 모든 수정을 반영한 통합 파이프라인
+**최종 재측정(v4_final)** 값이며, 괄호는 수정 **이전** 측정값입니다.
 
-| 최종 상태 | 건수 | 의미 |
+| 최종 상태 | 건수 (이전) | 의미 |
 |---|---:|---|
-| `ANSWERED` | 30 | 근거 연결 후 답변 |
-| `WITHHELD` | 28 | 근거 부족·인용 검증 실패로 보류 |
-| `REJECTED` | 9 | 범위 밖 질문 거절 |
+| `ANSWERED` | **55** (30) | 근거 연결 후 답변 |
+| `WITHHELD` | **3** (28) | 근거 부족·인용 검증 실패로 보류 |
+| `REJECTED` | 9 (9) | 범위 밖 질문 거절 |
 
-> 이 수치는 인용 검증·라우팅·가드레일 수정 **이전** 측정값입니다. 수정 후
-> `GS025`·`GS016`·`GS055`가 `ANSWERED`로 전환된 것은 확인했으나 67문항 전체
-> 재측정은 하지 않았습니다. 상세는 8절 디버깅 요약을 참고하세요.
+> 인용 검증·라우팅·가드레일·실행 레일(농약 조회/추천 분리) 수정을 모두 반영한 뒤
+> 67문항 전체를 재측정한 결과, 보류가 28→3건으로 줄었습니다. 남은 보류 3건은
+> NeMo 입력 정책 1건(`GS008`, 범위 밖)과 작물·병해충 추출 실패로 인한 실행 레일
+> `FALLBACK` 2건(`GS015`·`GS051`)입니다. 농약 조회 질문은 더 이상 제품명이 없다는
+> 이유로 막히지 않고, 20문항이 등록정보 경고(`WARN`)와 함께 답변됩니다.
 
 ### 7.5 Guardrails 시나리오 결과
 
@@ -519,6 +523,45 @@ RAGAS 품질 지표는 별도 작업으로 진행 중이라 이 절에 포함하
 오탐(정상인데 차단) 3건(`GC009`·`GC010`·`GC011`), 누락(위험인데 통과) 1건(`GC013`)입니다.
 **위험 요청 차단은 누락이 없고, 남은 약점은 정상 질문을 막는 오탐 쪽입니다.**
 상세는 [Guardrails 평가셋 리포트](docs/guardrail-eval-set-v1.md)에 있습니다.
+
+골든셋(검색·추론 채점용)에는 없는 **근거 부족·위험 요청·범위 밖** 유형은 이
+가드레일 평가셋(`data/evaluation/guardrail_eval_set_v2.jsonl`, 108건)이 담당합니다
+— 위험 요청(unsafe) 16 · 범위 밖(irrelevant) 11 · 품질 위험/근거 부족(quality_risk,
+빈 답변·근거 미포함·과차단/미차단 probe 포함) 37 · 정상(normal) 44. 즉 평가셋은
+golden_set(일반·Multi-hop)과 guardrail_eval_set(근거 부족·위험·무관)으로 나누어
+요구사항의 질문 유형을 모두 포함합니다.
+
+### 7.6 RAGAS 품질 지표
+
+통합 파이프라인 최종 실행 67문항 중 생성 답변이 있는 **57문항**(REJECTED·구조 실패 제외)에
+RAGAS를 적용했습니다. 평가 모델 `gpt-4.1`, 결과 원본은
+`data/evaluation/ragas_result/v4_final/`에 있습니다.
+
+| 지표 | 값 | 해석 |
+|---|---:|---|
+| Faithfulness(충실도) | **0.827** | 답변 주장의 83%가 검색 근거로 뒷받침됨 |
+| Context Recall | **0.870** | 정답 근거의 87%를 검색 문맥이 포함 |
+| Context Relevance | **0.982** | 검색 문맥 대부분이 질문과 관련 |
+| Context Precision | 0.574 | 관련 문맥의 상위 랭킹 정확도 |
+| Answer Correctness | 0.450 | 정답 대비 사실·의미 일치 |
+| Answer Relevancy | 0.256 | ↓ 아래 해석 참고 |
+
+**Answer Relevancy가 낮은 이유 — 지표와 설계 방향의 불일치입니다.** 점수를 맞추려
+답변 방식을 바꾸지 않고 원인을 공개합니다.
+
+- RAGAS Answer Relevancy는 답변에서 역질문을 생성해 원질문과의 임베딩 유사도로
+  측정하며, **헷지·보류성(noncommittal) 답변을 0점으로 처리**합니다. 57문항 중 24문항이
+  0.1 미만이고, 그 다수가 농약 등록정보 답변입니다. 이 답변들은 설계상 `등록상태=
+  PRELIMINARY_PASS`, `⚠️ 재확인 필요` 같은 안전 단서를 포함하므로 지표상 noncommittal로
+  분류됩니다. "틀린 답보다 보류"라는 본 시스템의 방향과 이 지표가 상충합니다.
+- 농약 **목록·표 형태 답변**(여러 품목·희석배수·횟수를 나열)은 단일 역질문으로 환원되지
+  않아 유사도가 낮게 나옵니다(`GS012`·`GS014` 등 AR 0.0).
+- 반면 단일 주장형 답변(`GS025` 노균병, `GS044` 적합 지역)은 AR 0.84~0.86으로 정상입니다.
+- 또한 측정에 쓴 `response`에는 출처 블록(근거 원문 JSON)이 포함돼 있어 답변 본문이
+  희석됩니다. 향후 RAGAS 입력은 출처 블록을 제외한 답변 본문만 쓰도록 분리할 계획입니다.
+
+따라서 생성 품질은 **근거 충실도(Faithfulness 0.83)와 문맥 재현율(Context Recall 0.87)**
+로 해석하고, Answer Relevancy는 위 아티팩트를 감안해 참고 지표로만 봅니다.
 
 ---
 
@@ -571,8 +614,9 @@ Langfuse 계측을 LangChain CallbackHandler 기반으로 교체해 노드별 in
 
 - 📄 [GraphRAG Multi-hop 검색 초기 이슈 및 최종 개선 결과](docs/multihop-retrieval-report.md)
 - 📄 [VECTOR 검색 초기 이슈 및 최적화 결과](docs/vector-search-optimization-report.md)
-- 📊 RAGAS 실행 원본(검색 개선 **반영 전** 측정, 성능 수치로 인용하지 않음):
-  `data/evaluation/ragas_result/` · `data/evaluation/rag_eval_results_v2.jsonl`
+- 📊 RAGAS 실행 원본: **최종(모든 수정 반영)** `data/evaluation/ragas_result/v4_final/`(§7.6 지표의 근거) ·
+  초기(검색 개선 **반영 전**, 성능 수치로 인용하지 않음) `data/evaluation/ragas_result/` 하위 v1~v3 ·
+  `data/evaluation/rag_eval_results_v2.jsonl`
 - 📄 [Langfuse 실행 trace 연결 및 trajectory 리포트](docs/langfuse-trace-report.md)
 - 📄 [Langfuse trajectory 디버깅 기록 (재현 질문·실패 단계·수정 전후 trace)](docs/langfuse-debugging-record.md)
 - 🔍 Langfuse trace 원본: `data/evaluation/demo_traces.jsonl`(시연 4종) ·
@@ -642,13 +686,16 @@ Langfuse 계측을 LangChain CallbackHandler 기반으로 교체해 노드별 in
 span을 찍는 구조라 자식 span의 input/output이 전부 비어 있고 소요시간이 0이었습니다.
 CallbackHandler로 노드 실행 구간을 직접 감싸도록 교체해, 위 디버깅이 가능해졌습니다.
 
-**Execution Rail이 정상 조회를 막습니다 (미해결).** 농약 조회에 제품명·작물·병해충
-3개를 모두 요구하는데 Supervisor가 `product_name`·`target_pest`를 상태에 채우지
-않습니다([execution_adapter.py:67](src/guardrails/execution_adapter.py#L67)).
-v1 대비 v2에서 새로 보류된 22건(ANSWERED→WITHHELD 21, REJECTED→WITHHELD 1) 중
-대부분이 이 조건 때문입니다. "배추 파밤나방 방제에 등록된 농약 품목은?"처럼
-제품명이 없어도 정상인 질문이 막힙니다. **조회는 작물+병해충, 추천은 제품명까지
-요구하도록 분리**하는 방향으로 정리 중이며, 추천·위험 요청 차단 정책은 그대로 둡니다.
+**Execution Rail이 정상 조회를 막던 문제 (해결).** 과거에는 농약 조회에 제품명·작물·
+병해충 3개를 모두 요구해, 제품명이 없어도 정상인 "배추 파밤나방 방제 등록 농약 품목은?"
+같은 질문이 막혔습니다. **조회는 작물+병해충만, 추천은 제품명까지 요구하도록 분리**하고
+(`identity_state_update`로 검색 결과에서 작물·병해충·제품명을 채운 뒤
+[execution_adapter.py](src/guardrails/execution_adapter.py)에서 분기), 이를 Supervisor
+그래프에 연결했습니다([graph.py:814](src/supervisor/graph.py#L814)). 추천·위험 요청
+차단 정책은 그대로 뒀습니다. 재측정(v4_final) 결과 농약 조회 20문항이 등록정보
+경고(`WARN`)와 함께 정상 답변되고, 보류는 28→3건으로 줄었습니다(§7.4). 남은 보류 중
+실행 레일 `FALLBACK`은 작물·병해충 **추출** 실패 2건(`GS015`·`GS051`)으로, 조건을
+과도하게 요구하던 원래 문제와는 다릅니다.
 
 **가드레일과 Supervisor 수정이 충돌했습니다.** 두 작업이 같은 파일을 건드려
 서로의 변경을 덮어쓸 뻔했습니다. 이후 수정 예정 파일을 먼저 공유하고, 겹치는
@@ -664,9 +711,10 @@ v1 대비 v2에서 새로 보류된 22건(ANSWERED→WITHHELD 21, REJECTED→WIT
 
 ### 다음 개선 항목
 
-1. 실행 가드레일이 정상 농약 질문을 막는 오탐 조정 (현재 normal 통과율 84.1%)
-2. 수정 반영 후 골든셋 67문항 재측정 — `WITHHELD` 28건이 얼마나 줄었는지 확인
-3. 평가셋에 근거 부족·위험 요청 유형 추가 (현재 각 0건, 시연 질문은 수동 작성)
+1. 가드레일 시나리오 기준 정상 질문 오탐 조정 (synthetic 평가 normal 통과율 84.1%,
+   오탐 `GC009`~`GC011` 3건)
+2. 작물·병해충 추출 실패로 남은 실행 레일 `FALLBACK` 2건(`GS015`·`GS051`) 해소
+3. RAGAS Answer Relevancy 측정 시 출처 블록을 제외한 답변 본문만 입력으로 분리 (§7.6)
 4. GRAPH 후보 회수·순위 경쟁 문제 (GS012·GS018·GS026 등 6문항)
 
 ### 남은 한계
@@ -674,7 +722,8 @@ v1 대비 v2에서 새로 보류된 22건(ANSWERED→WITHHELD 21, REJECTED→WIT
 - 농약 등록상태 910건은 검토가 필요하며 답변에 ⚠️로 표시만 하고 있음
 - Multi-hop 정답 경로가 비유일(15/17문항)해 exact-match 기준이 과소평가될 수 있음
 - 출처 URL 결측 11건은 기관명·문서 제목으로만 추적 가능
-- RAGAS 지표는 검색 개선 반영 전 측정값이라 현재 성능으로 인용할 수 없음
+- RAGAS Answer Relevancy(0.256)는 헷지·보류성 답변과 목록형 답변을 0점 처리하는
+  지표 특성상 낮게 나오며, 생성 품질은 Faithfulness·Context Recall로 해석함(§7.6)
 
 ---
 
