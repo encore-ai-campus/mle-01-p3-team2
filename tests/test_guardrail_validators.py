@@ -1,3 +1,5 @@
+import pytest
+
 from src.retrievers.search_result import SearchResult
 
 from src.guardrails.contracts import GuardrailRequest
@@ -313,7 +315,7 @@ def test_missing_expected_facts_uses_llm_judge(monkeypatch):
 
     from src.guardrails.contracts import ValidationResult
 
-    def mock_judge(question, answer, evidence):
+    def mock_judge(question, answer, evidence, verified_conditions=()):
         assert question == "질문"
         assert "4~5월" in answer
         assert "4~5월" in evidence
@@ -386,3 +388,489 @@ def test_non_iterable_evidence_is_blocked_without_raising():
 
     assert result.allowed is False
     assert result.decision == "BLOCK"
+
+
+class _StubCompletions:
+    """OpenAI 판정 응답을 흉내내는 스텁."""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def create(self, **_kwargs):
+        message = type("M", (), {"content": self._payload})()
+        choice = type("C", (), {"message": message})()
+        return type("R", (), {"choices": [choice]})()
+
+
+class _StubClient:
+    def __init__(self, payload):
+        self.chat = type(
+            "Chat", (), {"completions": _StubCompletions(payload)}
+        )()
+
+
+def _judge_request():
+    from src.guardrails.contracts import GuardrailRequest
+
+    return GuardrailRequest(
+        question="배추 배추흰나비 방제 약제의 사용 기준은?",
+        answer="베스탄은 발병 초부터 10일 간격으로 살포합니다.",
+        evidence=[
+            {
+                "source": "graph",
+                "text": (
+                    "작물=배추; 병해충=배추흰나비; 상표=베스탄; "
+                    "사용적기=발병 초 10일 간격"
+                ),
+                "evidence_ids": ["ev_1"],
+                "source_ids": [],
+                "chunk_ids": [],
+                "metadata": {},
+            }
+        ],
+    )
+
+
+def _run_judge(monkeypatch, payload, request=None):
+    import src.guardrails.output_validator as module
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        module,
+        "OpenAI",
+        lambda **_kwargs: _StubClient(payload),
+    )
+
+    return module.validate_output(request or _judge_request())
+
+
+def test_judge_wording_severity_allows_with_warning(monkeypatch):
+    """표현 차이만 있으면 보류하지 않고 경고로 전달한다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "severity": "WORDING", '
+        '"reason": "같은 간격을 다르게 서술함"}',
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+    assert result.warnings
+    assert result.details["judge_severity"] == "WORDING"
+
+
+def test_judge_conflict_severity_falls_back(monkeypatch):
+    """근거와 어긋나는 수치는 기존대로 보류한다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "severity": "CONFLICT", '
+        '"reason": "희석배수가 다름"}',
+    )
+
+    assert result.allowed is False
+    assert result.decision == "FALLBACK"
+    assert result.details["judge_severity"] == "CONFLICT"
+
+
+def test_judge_allowed_keeps_allow_decision(monkeypatch):
+    """근거와 일치하면 그대로 통과한다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": true, "severity": "", "reason": "일치"}',
+    )
+
+    assert result.allowed is True
+    assert result.decision == "ALLOW"
+
+
+def test_judge_registered_value_objection_is_deferred(monkeypatch):
+    """등록 수치 이견은 결정론 검증 담당이므로 보류하지 않는다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "REGISTERED_VALUE", '
+        '"severity": "CONFLICT", "reason": "희석배수가 다름"}',
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+    assert result.details["judge_category"] == "REGISTERED_VALUE"
+    assert result.warnings
+
+
+def test_judge_verification_status_objection_is_deferred(monkeypatch):
+    """검증상태 이견은 규칙 삽입 담당이므로 보류하지 않는다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "VERIFICATION_STATUS", '
+        '"severity": "UNSUPPORTED", '
+        '"reason": "REVIEW_REQUIRED인데 사용 가능하다고 단정"}',
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+
+
+def test_judge_completeness_objection_is_deferred(monkeypatch):
+    """답변 완전성은 판정 대상이 아니다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "COMPLETENESS", '
+        '"severity": "UNSUPPORTED", "reason": "일부 항목 누락"}',
+    )
+
+    assert result.allowed is True
+
+
+@pytest.mark.parametrize(
+    "category",
+    ["FABRICATED", "WRONG_TARGET", "OVERGENERALIZED"],
+)
+def test_judge_in_scope_objection_still_withholds(monkeypatch, category):
+    """판정 범위 안의 사유는 그대로 보류한다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "' + category + '", '
+        '"severity": "UNSUPPORTED", "reason": "근거 없음"}',
+    )
+
+    assert result.allowed is False
+    assert result.decision == "FALLBACK"
+    assert result.details["judge_category"] == category
+
+
+def test_explicit_usability_claim_without_notice_still_withholds(monkeypatch):
+    """현재 사용 가능하다는 명시적 단정은 기존처럼 보류한다."""
+    request = GuardrailRequest(
+        question="배추흰나비 약제를 지금 사용해도 되나요?",
+        answer="베스탄은 현재 사용 가능합니다.",
+        evidence=_judge_request().evidence,
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "USABILITY_CLAIM", '
+        '"severity": "UNSUPPORTED", "reason": "현재 사용 가능 단정"}',
+        request,
+    )
+
+    assert result.allowed is False
+    assert result.decision == "FALLBACK"
+
+
+def test_judge_unknown_category_still_withholds(monkeypatch):
+    """분류를 알 수 없으면 안전한 쪽으로 보류한다."""
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "reason": "분류 없음"}',
+    )
+
+    assert result.allowed is False
+    assert result.decision == "FALLBACK"
+
+
+def test_verified_conditions_reach_the_judge(monkeypatch):
+    """이미 대조한 항목을 판정 모델에 사실로 넘긴다."""
+    import src.guardrails.output_validator as module
+
+    from src.guardrails.contracts import GuardrailRequest
+
+    captured = {}
+
+    class _Capturing(_StubCompletions):
+        def create(self, **kwargs):
+            captured["user"] = kwargs["messages"][1]["content"]
+            return super().create(**kwargs)
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            self.chat = type(
+                "Chat", (), {"completions": _Capturing(
+                    '{"allowed": true, "category": "NONE", "reason": "ok"}'
+                )}
+            )()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(module, "OpenAI", lambda **_kw: _Client())
+
+    base = _judge_request()
+    request = GuardrailRequest(
+        question=base.question,
+        answer=base.answer,
+        evidence=base.evidence,
+        metadata={"verified_conditions": ["희석배수", "사용횟수"]},
+    )
+
+    module.validate_output(request)
+
+    assert "이미 확인된 사항" in captured["user"]
+    assert "희석배수, 사용횟수" in captured["user"]
+
+
+def test_gs035_usability_claim_without_explicit_claim_is_deferred(monkeypatch):
+    """등록 사용기준 목록을 현재 사용 가능 단정으로 오인해도 통과한다."""
+    request = GuardrailRequest(
+        question="배추 복숭아혹진딧물 등록 약제와 사용기준은?",
+        answer=(
+            "배추의 복숭아혹진딧물 등록 약제와 사용기준은 다음과 "
+            "같습니다.\n스미사이딘: 발생초기, 2000배 희석."
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=배추; 병해충=복숭아혹진딧물; "
+                    "상표=스미사이딘; 등록번호=3-살충-154; "
+                    "사용적기=발생초기; 희석배수=2000"
+                )
+            }
+        ],
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "USABILITY_CLAIM", '
+        '"severity": "UNSUPPORTED", '
+        '"reason": "지금 사용해도 된다고 단정함"}',
+        request,
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+    assert result.details["judge_category"] == "USABILITY_CLAIM"
+
+
+def test_review_required_notice_downgrades_usability_claim(monkeypatch):
+    """REVIEW_REQUIRED 확인 안내가 있으면 사용 가능성 이견을 경고로 낮춘다."""
+    request = GuardrailRequest(
+        question="배추흰나비 등록 약제는?",
+        answer=(
+            "일품은 현재 사용 가능합니다. 검증상태는 REVIEW_REQUIRED입니다."
+            "\n\n[등록정보 검증상태]\n"
+            "일품은 현재 등록·사용 가능 여부가 확인되지 않았습니다. "
+            "사용 전 최신 공식 등록정보를 확인해 주세요."
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=배추; 병해충=배추흰나비; 상표=일품; "
+                    "등록번호=45-살충-25; 검증상태=REVIEW_REQUIRED"
+                )
+            }
+        ],
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "USABILITY_CLAIM", '
+        '"severity": "CONFLICT", "reason": "사용 가능성을 단정함"}',
+        request,
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+
+
+def test_gs036_exact_brand_registration_pairs_override_fabricated(monkeypatch):
+    """동일 품목의 복수 상표를 혼동한 FABRICATED 오판을 무효화한다."""
+    request = GuardrailRequest(
+        question="마늘 잎마름병 등록 약제는?",
+        answer=(
+            "플루디옥소닐 액상수화제(상표: 에이팜썬더, "
+            "등록번호: 2-살균-279): 희석배수 2000.\n"
+            "플루디옥소닐 액상수화제(상표: 신기록-D, "
+            "등록번호: 64-살균-15): 희석배수 2000."
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=마늘; 병해충=잎마름병; "
+                    "품목=플루디옥소닐 액상수화제; 상표=에이팜썬더; "
+                    "등록번호=2-살균-279; 희석배수=2000"
+                )
+            },
+            {
+                "text": (
+                    "작물=마늘; 병해충=잎마름병; "
+                    "품목=플루디옥소닐 액상수화제; 상표=신기록-D; "
+                    "등록번호=64-살균-15; 희석배수=2000"
+                )
+            },
+        ],
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "FABRICATED", '
+        '"severity": "CONFLICT", '
+        '"reason": "에이팜썬더의 상표와 등록번호가 근거와 다름"}',
+        request,
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+    assert result.details["judge_category"] == "FABRICATED"
+
+
+def test_gs066_usage_instruction_is_not_current_usability_claim(monkeypatch):
+    """등록 사용법의 '사용하며'를 현재 사용 가능 단정으로 보지 않는다."""
+    request = GuardrailRequest(
+        question="고추 탄저병 등록 약제와 사용기준은?",
+        answer=(
+            "베노밀 수화제(밧사피, 등록번호 1-살균-53)는 "
+            "발병초부터 10일 간격으로 사용하며, 최대 4회 이내, "
+            "수확 2일 전까지 사용합니다."
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=고추; 병해충=탄저병; 품목=베노밀 수화제; "
+                    "상표=밧사피; 등록번호=1-살균-53; "
+                    "사용적기=발병초부터 10일간격; "
+                    "수확 전 사용시기=수확 2일 전까지; "
+                    "최대 사용횟수=4회 이내"
+                )
+            }
+        ],
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "USABILITY_CLAIM", '
+        '"severity": "UNSUPPORTED", '
+        '"reason": "사용 가능성을 단정적으로 표현함"}',
+        request,
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+    assert result.details["deterministic_override"] == (
+        "NO_EXPLICIT_USABILITY_CLAIM"
+    )
+
+
+def test_gs012_grounded_usage_row_overrides_overgeneralized(monkeypatch):
+    """제품별 사용적기가 근거와 같으면 OVERGENERALIZED 오판을 낮춘다."""
+    request = GuardrailRequest(
+        question="배추 파밤나방 등록 약제와 사용기준은?",
+        answer=(
+            "비펜트린 입상수화제·팡자비·46-살충-449 | "
+            "다발생기 | 수확 14일 전까지 | 4000배 | 3회 이내"
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=배추; 병해충=파밤나방; "
+                    "품목=비펜트린 입상수화제; 상표=팡자비; "
+                    "등록번호=46-살충-449; 사용적기=다발생기; "
+                    "수확 전 사용시기=수확 14일 전까지; "
+                    "최대 사용횟수=3회 이내; 희석배수=4000"
+                )
+            }
+        ],
+        metadata={
+            "verified_conditions": [
+                "희석배수", "사용횟수", "수확 전 사용시기"
+            ]
+        },
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "OVERGENERALIZED", '
+        '"severity": "CONFLICT", '
+        '"reason": "팡자비를 애벌레 발생초기로 일반화함"}',
+        request,
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+    assert result.details["deterministic_override"] == (
+        "REGISTERED_USAGE_ROWS_VERIFIED"
+    )
+
+
+def test_gs036_grounded_registration_rows_override_overgeneralized(monkeypatch):
+    """복수 제품의 등록번호·수치가 근거와 같으면 judge 오판을 낮춘다."""
+    request = GuardrailRequest(
+        question="마늘 잎마름병 방제용 품목과 사용조건은?",
+        answer=(
+            "트리플록시스트로빈 액상수화제(헌티드, 등록번호 "
+            "63-살균-71): 발생초기에 10일 간격으로 사용하고, 2000배, "
+            "수확 7일 전, 3회.\n"
+            "프로피코나졸.테부코나졸 유현탁제(이차메, 등록번호 "
+            "8-살균-310): 발병초부터 10일 간격, 2000배, "
+            "수확 14일 전까지, 3회 이내."
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=마늘; 병해충=잎마름병; "
+                    "품목=트리플록시스트로빈 액상수화제; 상표=헌티드; "
+                    "등록번호=63-살균-71; 사용적기=발생초기 10일간격; "
+                    "수확 전 사용시기=수확7일전; 최대 사용횟수=3회; "
+                    "희석배수=2000"
+                )
+            },
+            {
+                "text": (
+                    "작물=마늘; 병해충=잎마름병; "
+                    "품목=프로피코나졸.테부코나졸 유현탁제; "
+                    "상표=이차메; 등록번호=8-살균-310; "
+                    "사용적기=발병초 10일간격; "
+                    "수확 전 사용시기=수확 14일 전까지; "
+                    "최대 사용횟수=3회 이내; 희석배수=2000"
+                )
+            },
+        ],
+        metadata={
+            "verified_conditions": [
+                "희석배수", "사용횟수", "수확 전 사용시기"
+            ]
+        },
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "OVERGENERALIZED", '
+        '"severity": "CONFLICT", '
+        '"reason": "등록번호와 희석배수가 근거와 다름"}',
+        request,
+    )
+
+    assert result.allowed is True
+    assert result.decision == "WARN"
+
+
+def test_wrong_usage_timing_still_blocks_overgeneralized(monkeypatch):
+    """식별자·수치가 맞아도 사용적기를 바꾸면 계속 보류한다."""
+    request = GuardrailRequest(
+        question="배추 파밤나방 등록 약제와 사용기준은?",
+        answer=(
+            "비펜트린 입상수화제·팡자비·46-살충-449 | "
+            "애벌레 발생초기 | 수확 14일 전까지 | 4000배 | 3회 이내"
+        ),
+        evidence=[
+            {
+                "text": (
+                    "작물=배추; 병해충=파밤나방; "
+                    "품목=비펜트린 입상수화제; 상표=팡자비; "
+                    "등록번호=46-살충-449; 사용적기=다발생기; "
+                    "수확 전 사용시기=수확 14일 전까지; "
+                    "최대 사용횟수=3회 이내; 희석배수=4000"
+                )
+            }
+        ],
+        metadata={
+            "verified_conditions": [
+                "희석배수", "사용횟수", "수확 전 사용시기"
+            ]
+        },
+    )
+
+    result = _run_judge(
+        monkeypatch,
+        '{"allowed": false, "category": "OVERGENERALIZED", '
+        '"severity": "CONFLICT", "reason": "사용적기가 다름"}',
+        request,
+    )
+
+    assert result.allowed is False
+    assert result.decision == "FALLBACK"

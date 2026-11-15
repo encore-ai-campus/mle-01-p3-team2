@@ -68,6 +68,9 @@ class GraphState(TypedDict, total=False):
     # Guardrails - Input / Dialog
     guardrail_decision: str
     guardrail_reason: str
+
+    # 보류·차단 원인 추적용 판정 상세(LLM 판정 severity 등)
+    guardrail_details: dict[str, Any]
     pesticide_use_requested: bool
     input_intent: str
     dialog_action: str
@@ -78,8 +81,10 @@ class GraphState(TypedDict, total=False):
     # Guardrails - 농약 검증
     product_name: str
     target_pest: str
+    product_candidates: list[str]
 
     # Guardrails - Execution
     execution_decision: str
     execution_reason: str
     execution_record: dict[str, Any] | None
+    execution_records: list[dict[str, Any]]

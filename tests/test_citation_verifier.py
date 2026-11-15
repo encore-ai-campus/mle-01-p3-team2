@@ -262,3 +262,73 @@ def test_citable_text_without_graph_path_is_quote_only():
         source="vector",
     )
     assert citable_text(evidence) == _GS025_SOURCE
+
+
+def test_gs031_repairs_unknown_id_from_unique_matching_quote():
+    """존재하지 않는 ID도 인용문이 한 근거에만 있으면 안전하게 교정한다."""
+    from src.supervisor.citation_verifier import repair_unknown_citation_ids
+
+    answer = CitedAnswer(
+        answer="진주시에서 파종한 상추 품종은 공심채입니다.",
+        claims=[
+            Claim(
+                text="진주시에서 파종한 상추 품종은 공심채이다.",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_UNKNOWN",
+                        quote="상추 품종 '공심채'을 파종한 실측 기록이다.",
+                    )
+                ],
+            )
+        ],
+    )
+    evidence = Evidence(
+        evidence_id="EVD_GS031",
+        document_id="DOC_GS031",
+        title="진주시 파종 기록",
+        url="",
+        quote=(
+            "경상남도 진주시의 익명 농가·육묘장에서 20231219에 "
+            "상추 품종 '공심채'을 파종한 실측 기록이다."
+        ),
+        source="graph",
+    )
+
+    repaired = repair_unknown_citation_ids(answer, [evidence])
+
+    assert repaired.claims[0].citations[0].evidence_id == "EVD_GS031"
+    assert answer.claims[0].citations[0].evidence_id == "EVD_UNKNOWN"
+
+
+def test_unknown_id_is_not_repaired_when_quote_matches_multiple_evidences():
+    """인용문이 여러 근거에 있으면 임의의 ID로 바꾸지 않는다."""
+    from src.supervisor.citation_verifier import repair_unknown_citation_ids
+
+    answer = CitedAnswer(
+        answer="공심채입니다.",
+        claims=[
+            Claim(
+                text="품종은 공심채이다.",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_UNKNOWN",
+                        quote="품종은 공심채이다.",
+                    )
+                ],
+            )
+        ],
+    )
+    evidences = [
+        Evidence(
+            evidence_id=f"EVD_{index}",
+            document_id=f"DOC_{index}",
+            title="기록",
+            url="",
+            quote="품종은 공심채이다.",
+        )
+        for index in (1, 2)
+    ]
+
+    repaired = repair_unknown_citation_ids(answer, evidences)
+
+    assert repaired.claims[0].citations[0].evidence_id == "EVD_UNKNOWN"

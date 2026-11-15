@@ -8,6 +8,7 @@ from src.guardrails.pipeline import validate_request
 from src.guardrails.output_usage_validator import (
     validate_pesticide_output,
 )
+from src.guardrails.verification_notice import annotate_answer
 
 
 def _withhold(reason: str) -> dict[str, Any]:
@@ -84,6 +85,7 @@ def guardrails_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # 4. Execution Rail에서 검증한 등록정보 확인
     execution_record = state.get("execution_record")
+    execution_records = state.get("execution_records") or []
     execution_decision = state.get("execution_decision")
 
     if is_pesticide_request:
@@ -94,12 +96,66 @@ def guardrails_node(state: dict[str, Any]) -> dict[str, Any]:
                 "완료되지 않았습니다."
             )
 
-    # 5. 기존 검색 근거 일치 검증
+    # 5. 농약 사용조건 검증
+    #
+    # 공식 등록정보로 수치를 대조하는 검사를 근거 일치 판정보다 먼저
+    # 돌린다. 판정 모델에게 "이 항목은 이미 대조했다"는 사실을 함께
+    # 넘겨, 근거 줄을 혼동해 같은 수치를 불일치로 보는 것을 줄인다.
+    #
+    # 등록정보의 검증상태도 모델이 빠뜨려도 근거에 있는 사실이므로
+    # 규칙으로 먼저 덧붙인다.
+    usage_warnings: list[str] = []
+    verified_conditions: list[str] = []
+
+    if is_pesticide_request:
+        answer = annotate_answer(answer, execution_records)
+
+        try:
+            usage_result = validate_pesticide_output(
+                answer=answer,
+                record=execution_record,
+                records=execution_records,
+                pesticide_use_requested=True,
+                recommendation_requested=is_recommendation,
+            )
+        except Exception:
+            return _withhold("농약 사용조건 검증 실행 실패")
+
+        if not usage_result["allowed"]:
+            decision = usage_result["decision"]
+
+            return {
+                "guardrail_decision": (
+                    "BLOCK" if decision == "BLOCK" else "FALLBACK"
+                ),
+                "guardrail_reason": usage_result["reason"],
+                "warnings": list(state.get("warnings", [])),
+                "final_status": (
+                    "BLOCKED" if decision == "BLOCK" else "WITHHELD"
+                ),
+                "final_answer": (
+                    "농약 사용조건을 안전하게 확인하지 못했습니다. "
+                    "최신 공식 등록정보와 제품 라벨을 확인해 주세요."
+                ),
+            }
+
+        usage_warnings = list(usage_result.get("warnings") or [])
+
+        # 대조를 마친 항목만 판정 모델에 사실로 알린다.
+        unverified = set(usage_result.get("unverified_fields") or [])
+        verified_conditions = [
+            name
+            for name in ("희석배수", "사용횟수", "수확 전 사용시기")
+            if name not in unverified
+        ]
+
+    # 6. 검색 근거 일치 검증
     request = GuardrailRequest(
         question=question,
         answer=answer,
         evidence=results,
         pesticide_use_requested=pesticide_use_requested,
+        metadata={"verified_conditions": verified_conditions},
     )
 
     try:
@@ -120,6 +176,11 @@ def guardrails_node(state: dict[str, Any]) -> dict[str, Any]:
         "guardrail_decision": result.decision,
         "guardrail_reason": result.reason,
         "warnings": warnings,
+
+        # 어느 판정이 보류를 만들었는지 평가에서 되짚기 위해 남긴다.
+        "guardrail_details": dict(
+            getattr(result, "details", None) or {}
+        ),
     }
 
     # 기존 검증이 거절한 답변은 신규 검사로 허용할 수 없음
@@ -140,54 +201,20 @@ def guardrails_node(state: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
-    # 6. 농약 사용조건 추가 검사
+    # 7. 검증하지 못한 사용조건과 등록 유효성 주의사항을 전달한다.
     if is_pesticide_request:
-        try:
-            usage_result = validate_pesticide_output(
-                answer=answer,
-                record=execution_record,
-                pesticide_use_requested=True,
-                recommendation_requested=is_recommendation,
-            )
-        except Exception:
-            return {
-                **base_update,
-                **_withhold(
-                    "농약 사용조건 검증 실행 실패"
-                ),
-            }
+        warnings = list(dict.fromkeys([
+            *warnings,
+            *usage_warnings,
+        ]))
 
-        # 농약 사용조건에서 문제가 발견되면 최종 답변 차단
-        if not usage_result["allowed"]:
-            decision = usage_result["decision"]
-
-            return {
-                **base_update,
-                "guardrail_decision": (
-                    "BLOCK"
-                    if decision == "BLOCK"
-                    else "FALLBACK"
-                ),
-                "guardrail_reason": usage_result["reason"],
-                "final_status": (
-                    "BLOCKED"
-                    if decision == "BLOCK"
-                    else "WITHHELD"
-                ),
-                "final_answer": (
-                    "농약 사용조건을 안전하게 확인하지 못했습니다. "
-                    "최신 공식 등록정보와 제품 라벨을 확인해 주세요."
-                ),
-            }
-
-        # Execution Rail이 요구한 주의사항도 보존
         if execution_decision == "WARN":
             warnings = list(dict.fromkeys([
                 *warnings,
                 "농약 등록정보의 최신 유효성을 확인해야 합니다.",
             ]))
 
-    # 7. 모든 검증을 통과한 답변만 반환
+    # 8. 모든 검증을 통과한 답변만 반환
     final_answer = answer
 
     if warnings:
