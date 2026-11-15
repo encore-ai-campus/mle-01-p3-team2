@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-11-14T15:12:08+09:00",
+  "total_cases": 30,
+  "seed": 42,
+  "source_paths": {
+    "golden_set": "data/evaluation/golden_set_final.jsonl",
+    "chunks": "data/processed/chunks.jsonl"
+  },
+  "output_path": "data/evaluation/guardrail_cases_final.jsonl",
+  "output_sha256": "462f04f4acdec4e749b96796fa5e9f47fa4cc5ccc20495326d5f2923d660a917",
+  "scenario_counts": {
+    "irrelevant": 4,
+    "malformed_evidence": 4,
+    "missing_evidence": 4,
+    "normal": 6,
+    "pesticide_unsafe": 4,
+    "pesticide_warning": 4,
+    "unsupported_answer": 4
+  },
+  "expected_decision_counts": {
+    "ALLOW": 6,
+    "BLOCK": 16,
+    "FALLBACK": 4,
+    "WARN": 4
+  },
+  "source_case_ids": [
+    "GS002",
+    "GS007",
+    "GS008",
+    "GS009",
+    "GS012",
+    "GS013",
+    "GS016",
+    "GS017",
+    "GS028",
+    "GS029",
+    "GS038",
+    "GS040",
+    "GS048",
+    "GS050",
+    "GS051",
+    "GS057",
+    "GS058",
+    "GS065"
+  ],
+  "review_required": true,
+  "review_note": "자동 생성 결과입니다. 최종 평가 전에 WARN/BLOCK 정책과 질문·근거의 의미 일치를 사람이 검수해야 합니다."
+}

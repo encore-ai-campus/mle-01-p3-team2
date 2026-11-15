@@ -206,3 +206,37 @@ def test_relation_type_guide_covers_every_valid_relation():
     assert set(RELATION_TYPE_DESCRIPTIONS) == set(VALID_RELATION_TYPES)
     for name in VALID_RELATION_TYPES:
         assert name in RELATION_TYPE_GUIDE
+
+
+# --- 등록 약제 사용 기준 질문이 VECTOR로 빠져 그래프 근거를 놓치던 회귀 (GS020) ---
+
+
+def test_jev_router_upgrades_vector_to_hybrid_for_registered_pesticide_question():
+    """등록 약제 사용 기준은 그래프 관계에만 있어 원문 검색만으로는 부족하다."""
+
+    class Classifier:
+        def invoke(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                choices={"route": SimpleNamespace(choice="VECTOR")}
+            )
+
+    decision = JevQuestionRouter(Classifier()).route_query(
+        "배추에 발생한 벼룩잎벌레를 방제하려면 등록된 약제와 사용 방법이 어떻게 되나요?"
+    )
+    assert decision.route == "HYBRID"
+    assert "등록 약제" in decision.reason
+
+
+def test_jev_router_keeps_vector_for_general_pesticide_timing_question():
+    """'등록'을 묻지 않는 살포 시기 질문은 분류기의 VECTOR 판단을 유지한다."""
+
+    class Classifier:
+        def invoke(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                choices={"route": SimpleNamespace(choice="VECTOR")}
+            )
+
+    decision = JevQuestionRouter(Classifier()).route_query(
+        "대규모 재배에서 농약을 사용할 경우 언제 살포해야 하나요?"
+    )
+    assert decision.route == "VECTOR"

@@ -1,1 +1,1 @@
-{"golden_set_count":67,"success_count":0,"failure_count":67,"status_counts":{"REJECTED":9,"WITHHELD":58},"trace_count":67,"missing_trace_id_count":0,"result_jsonl":"data/evaluation/golden_trajectory_results.jsonl"}
+{"golden_set_count": 67, "success_count": 30, "failure_count": 37, "status_counts": {"REJECTED": 9, "WITHHELD": 28, "ANSWERED": 30}, "trace_count": 67, "missing_trace_id_count": 0, "result_jsonl": "data/evaluation/golden_trajectory_results.jsonl"}
