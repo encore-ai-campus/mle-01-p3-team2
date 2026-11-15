@@ -522,3 +522,180 @@ def test_pest_names_are_read_from_the_graph_only_once():
         if query.startswith("MATCH (n:Insect|Disease)")
     ]
     assert len(pest_lookups) == 1
+
+
+# --- 라우터 관계 타입·hop 수가 하드 필터로 작동해 2-hop 후보가 사라지던 회귀 ---
+# (multi-hop Top-5 미스 16건 진단: docs/multihop-top5-miss-analysis.md)
+
+
+def _path_queries(driver):
+    return [query for query, _ in driver.session_instance.calls if "MATCH path =" in query]
+
+
+def test_two_hop_search_relaxes_router_relation_types_when_nothing_matches():
+    """라우터가 이어지지 않는 관계 조합을 주면 타입 필터를 풀고 다시 찾는다."""
+
+    driver = FakeDriver(pest_rows=[{"name": "벼룩잎벌레"}])
+    retriever = GraphRetriever(driver)
+
+    retriever.search(
+        "배추에 발생한 벼룩잎벌레를 방제하려면 등록된 약제와 사용 방법이 어떻게 되나요?",
+        crop="배추",
+        max_hops=2,
+        # Crop에서 나가는 간선끼리의 조합이라 2-hop으로 이어지지 않는다.
+        relation_types=["HAS_REGISTERED_PESTICIDE_USE", "AFFECTED_BY_INSECT"],
+        limit=10,
+    )
+
+    queries = _path_queries(driver)
+    two_hop = [query for query in queries if "*2..2" in query]
+    assert len(two_hop) >= 3
+    assert ":`HAS_REGISTERED_PESTICIDE_USE`|`AFFECTED_BY_INSECT`" in two_hop[0]
+    assert ":`HAS_REGISTERED_PESTICIDE_USE`|`CONTROLS_TARGET`" in two_hop[1]
+    # 마지막 2-hop 시도는 관계 타입을 제한하지 않는다.
+    assert "-[*2..2]->" in two_hop[2]
+
+
+def test_pesticide_question_searches_two_hops_even_when_router_says_one_hop():
+    """약제 질문에 max_hops=1이 와도 2-hop 탐색을 보장한다."""
+
+    driver = FakeDriver(pest_rows=[{"name": "벼룩잎벌레"}])
+    retriever = GraphRetriever(driver)
+
+    retriever.search(
+        "배추 벼룩잎벌레 방제 약제의 사용 기준을 알려주세요",
+        crop="배추",
+        max_hops=1,
+        relation_types=["HAS_REGISTERED_PESTICIDE_USE"],
+        limit=10,
+    )
+
+    assert any("*2..2" in query for query in _path_queries(driver))
+    assert retriever.last_search_diagnostics["max_hops_used"] == 2
+
+
+def test_one_hop_search_drops_relation_filter_when_it_returns_nothing():
+    """시작 라벨에서 나갈 수 없는 관계 타입만 지정되면 필터를 버리고 재탐색한다."""
+
+    driver = FakeDriver()
+    retriever = GraphRetriever(driver)
+
+    retriever.search(
+        "배추에 등록된 플루페녹수론 약제는 어떤 피해를 방제하는 데 쓰이나요?",
+        crop="배추",
+        max_hops=1,
+        # Crop에는 CONTROLS_TARGET 간선이 없어 1-hop 결과가 공집합이 된다.
+        relation_types=["CONTROLS_TARGET"],
+        limit=10,
+    )
+
+    one_hop = [query for query in _path_queries(driver) if "*1..1" in query]
+    assert len(one_hop) == 2
+    assert ":`CONTROLS_TARGET`" in one_hop[0]
+    assert "-[*1..1]->" in one_hop[1]
+
+
+# --- 이름 정확 일치·사용 조건 기반 재랭킹 (docs/multihop-top5-miss-analysis.md 8절) ---
+
+from src.retrievers.graph_retriever import (  # noqa: E402
+    _condition_value_score,
+    _name_match_bonus,
+    _normalize,
+    _path_relevance_score,
+    _requested_condition_values,
+)
+
+
+def _pesticide_path(product, *, brand="", dilution="1000", use_count="3",
+                    use_timing="수확 7일 전까지", application_method="발생 초기 7일간격"):
+    nodes = [
+        {"entity_id": "CRP_1", "name": "배추", "entity_type": "Crop"},
+        {"entity_id": "PST_1", "name": f"{product} - 벼룩잎벌레", "entity_type": "PesticideUse"},
+        {"entity_id": "INS_1", "name": "벼룩잎벌레", "entity_type": "Insect"},
+    ]
+    edges = [
+        {"hop": 1, "relation_id": "REL_1", "relation_type": "HAS_REGISTERED_PESTICIDE_USE",
+         "from_entity_id": "CRP_1", "to_entity_id": "PST_1", "original_chunks": []},
+        {"hop": 2, "relation_id": "REL_2", "relation_type": "CONTROLS_TARGET",
+         "from_entity_id": "PST_1", "to_entity_id": "INS_1", "original_chunks": []},
+    ]
+    attributes = [
+        {"crop": "배추"},
+        {"product": product, "brand": brand, "crop": "배추", "target_name": "벼룩잎벌레",
+         "dilution": dilution, "use_count": use_count, "use_timing": use_timing,
+         "application_method": application_method, "registration_no": "12-배추-3"},
+        {"crop": "배추"},
+    ]
+    return nodes, edges, attributes
+
+
+def _pesticide_score(question, product, **kwargs):
+    nodes, edges, attributes = _pesticide_path(product, **kwargs)
+    return _path_relevance_score(nodes, edges, question, attributes)
+
+
+def test_name_match_bonus_ranks_exact_above_alias_above_partial():
+    """완전 일치 > 별칭 일치 > 부분 일치 순으로 보너스를 준다."""
+    question = _normalize("배추에 등록된 모스피란 수화제의 사용 기준은?")
+    terms = ["모스피란", "수화제", "배추"]
+
+    exact = _name_match_bonus(question, terms, "모스피란 수화제 - 벼룩잎벌레",
+                              {"product": "모스피란 수화제"})
+    alias = _name_match_bonus(question, terms, "다른 약제",
+                              {"product": "다른 약제", "aliases": ["모스피란"]})
+    partial = _name_match_bonus(question, terms, "모스피란유 혼합 제품군 전용",
+                                {"product": "혼합 제품군 전용 모스피란유제품"})
+    none = _name_match_bonus(question, terms, "전혀 다른 이름", {"product": "전혀 다른 이름"})
+
+    assert exact > alias > partial > none == 0.0
+
+
+def test_name_match_bonus_counts_crop_match_separately():
+    """작물명만 맞는 경우에는 식별 보너스보다 작은 값만 준다."""
+    question = _normalize("배추에 쓰는 약제를 알려주세요")
+    crop_only = _name_match_bonus(question, ["배추"], "어떤 약제", {"crop": "배추"})
+    assert 0.0 < crop_only < 6.0
+
+
+def test_requested_condition_values_reads_only_question_text():
+    """질문에 적힌 값만 추출한다(Gold 값 사용 금지)."""
+    requested = _requested_condition_values(
+        "1000배로 희석해 10일 간격으로 최대 3회, 수확 7일 전까지 쓰려면?"
+    )
+    assert requested["dilution"] == 1000
+    assert requested["interval_days"] == 10
+    assert requested["use_count"] == 3
+    assert requested["harvest_days"] == 7
+    assert _requested_condition_values("배추 약제를 알려주세요") == {}
+
+
+def test_condition_value_score_rewards_matching_values_only():
+    """값이 맞으면 가산, 틀리면 감산한다."""
+    requested = {"dilution": 1000, "use_count": 3}
+    match = _condition_value_score(requested, {"dilution": "1000", "use_count": "3"})
+    mismatch = _condition_value_score(requested, {"dilution": "3000", "use_count": "2"})
+    assert match > 0 > mismatch
+
+
+def test_named_product_outranks_sibling_path_with_same_shape():
+    """질문이 품목명을 말하면 같은 모양의 형제 경로보다 높은 점수를 받는다."""
+    question = "배추에 등록된 모스피란 수화제로 벼룩잎벌레를 방제하려면 어떻게 하나요?"
+    named = _pesticide_score(question, "모스피란 수화제")
+    sibling = _pesticide_score(question, "아바멕틴 유제")
+    assert named > sibling
+
+
+def test_complete_use_record_outranks_one_missing_requested_field():
+    """질문이 요구한 사용 기준 필드를 모두 갖춘 기록을 우대한다."""
+    question = "배추 벼룩잎벌레 약제의 희석배수와 최대 사용횟수, 수확 전 사용시기를 알려주세요"
+    complete = _pesticide_score(question, "가 약제")
+    missing = _pesticide_score(question, "가 약제", dilution="", use_count="")
+    assert complete > missing
+
+
+def test_question_stated_dilution_breaks_tie_between_sibling_paths():
+    """질문에 적힌 희석배수와 같은 기록이 형제 경로보다 앞선다."""
+    question = "배추 벼룩잎벌레 약제를 1000배로 희석해 쓰려면 어떤 약제를 쓰나요?"
+    matching = _pesticide_score(question, "가 약제", dilution="1000")
+    other = _pesticide_score(question, "가 약제", dilution="3000")
+    assert matching > other
