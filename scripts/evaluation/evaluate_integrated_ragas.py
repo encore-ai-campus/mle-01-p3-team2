@@ -218,6 +218,9 @@ def evaluate_ragas_rows(
     *,
     model_name: str,
     embedding_model: str,
+    timeout: int,
+    max_workers: int,
+    max_retries: int,
 ) -> list[dict[str, Any]]:
     """Run the six RAGAS metrics and return scores keyed by case_id."""
     if not rows:
@@ -236,6 +239,7 @@ def evaluate_ragas_rows(
         ContextRelevance,
         Faithfulness,
     )
+    from ragas.run_config import RunConfig
 
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(
@@ -249,6 +253,12 @@ def evaluate_ragas_rows(
     evaluator_embeddings = LangchainEmbeddingsWrapper(
         OpenAIEmbeddings(model=embedding_model)
     )
+    run_config = RunConfig(
+        timeout=timeout,
+        max_workers=max_workers,
+        max_retries=max_retries,
+        log_tenacity=True,
+    )
     result = evaluate(
         dataset=dataset,
         metrics=[
@@ -261,6 +271,10 @@ def evaluate_ragas_rows(
         ],
         llm=evaluator_llm,
         embeddings=evaluator_embeddings,
+        run_config=run_config,
+        # A partial RAGAS run must not be reported as a successful evaluation.
+        # With the default False, failed metric jobs are silently converted to NaN.
+        raise_exceptions=True,
     )
     frame = result.to_pandas()
     scored: list[dict[str, Any]] = []
@@ -271,7 +285,27 @@ def evaluate_ragas_rows(
         )
         scores = {name: _finite_float(values.get(name)) for name in RAGAS_METRICS}
         scored.append({"case_id": row["case_id"], **scores})
+    _require_complete_scores(scored)
     return scored
+
+
+def _require_complete_scores(scores: Sequence[dict[str, Any]]) -> None:
+    """Reject partial RAGAS output instead of persisting misleading averages."""
+    missing = {
+        str(row.get("case_id")): [
+            name for name in RAGAS_METRICS if _finite_float(row.get(name)) is None
+        ]
+        for row in scores
+    }
+    missing = {case_id: metrics for case_id, metrics in missing.items() if metrics}
+    if missing:
+        preview = ", ".join(
+            f"{case_id}={metrics}" for case_id, metrics in list(missing.items())[:10]
+        )
+        raise RuntimeError(
+            "RAGAS 평가에 누락된 지표가 있어 결과를 저장하지 않습니다: "
+            f"{preview}"
+        )
 
 
 def _finite_float(value: Any) -> float | None:
@@ -345,15 +379,36 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--model", default=os.getenv("OPENAI_EVAL_MODEL", "gpt-4.1"))
     parser.add_argument("--embedding-model", default="text-embedding-3-small")
+    parser.add_argument(
+        "--ragas-timeout",
+        type=int,
+        default=900,
+        help="RAGAS metric job timeout in seconds (default: 900)",
+    )
+    parser.add_argument(
+        "--ragas-max-workers",
+        type=int,
+        default=4,
+        help="Maximum concurrent RAGAS metric jobs (default: 4)",
+    )
+    parser.add_argument(
+        "--ragas-max-retries",
+        type=int,
+        default=10,
+        help="Maximum retries for transient RAGAS/API errors (default: 10)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    for name in ("ragas_timeout", "ragas_max_workers", "ragas_max_retries"):
+        if getattr(args, name) < 1:
+            raise ValueError(f"--{name.replace('_', '-')} must be a positive integer")
     root = args.root.resolve()
     golden_path = args.golden_set or root / "data/evaluation/golden_set_final.jsonl"
     chunk_path = args.chunks or root / "data/processed/chunks.jsonl"
-    output_dir = args.output_dir or root / "data/evaluation/ragas_result_final"
+    output_dir = args.output_dir or root / "data/evaluation/ragas_result"
     raw_path = output_dir / "supervisor_runs.jsonl"
     scored_path = output_dir / "ragas_results.jsonl"
     summary_path = output_dir / "ragas_summary.json"
@@ -395,6 +450,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         ragas_rows,
         model_name=args.model,
         embedding_model=args.embedding_model,
+        timeout=args.ragas_timeout,
+        max_workers=args.ragas_max_workers,
+        max_retries=args.ragas_max_retries,
     )
     merged = merge_ragas_scores(records, scores)
     write_jsonl(scored_path, merged)
