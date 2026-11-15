@@ -28,6 +28,7 @@ _ENTITY_STOPWORDS = {
     "등록", "등록된", "등록되어", "약제", "농약", "방제", "방제하는",
     "수확", "전", "까지", "최대", "횟수", "희석", "배수", "시기", "시기는",
     "작물", "병해", "해충", "발생", "재배", "적합", "사용할", "가능한",
+    "품종", "품종은", "품종이", "제품", "제품명", "품목", "품목명",
 }
 
 _RELATION_CUES: dict[str, tuple[str, ...]] = {
@@ -96,7 +97,7 @@ def _normalize(text: Any) -> str:
 # 후보들을 구별하지 못하므로 가중치를 낮게 둡니다.
 _IDENTITY_NAME_FIELDS = (
     "product", "brand", "active_ingredient_english", "source_variety_name",
-    "target_name", "formulation", "company",
+    "target_name", "company",
 )
 _ALIAS_NAME_FIELDS = ("aliases", "synonyms", "_variants", "classification_paths")
 _CROP_NAME_FIELDS = ("crop", "canonical_crop")
@@ -283,8 +284,7 @@ def _path_relevance_score(
     attribute_keys = {
         "aliases", "synonyms", "brand", "product", "target_name", "crop",
         "canonical_crop", "active_ingredient_english", "source_variety_name",
-        "_variants", "classification_paths", "cultivation_type", "formulation",
-        "company", "region", "growth_stage", "use_timing", "application_method",
+        "_variants", "region", "growth_stage", "use_timing", "application_method",
     }
     entity_coverage: set[str] = set()
     parsed_attributes: list[Mapping[str, Any]] = []
