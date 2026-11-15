@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.run_supervisor import build_app
 from src.streamlit.chatbot import generate_answer
 from src.streamlit.crop_page import render_crop_page
+from src.streamlit.home_page import render_home_page
 from src.streamlit.pest_page import render_pest_page
 from src.streamlit.pesticide_page import render_pesticide_page
 from src.streamlit.region_page import render_region_page
@@ -26,6 +27,7 @@ from src.streamlit.theme import (
     mascot_data_uri,
     mascot_path,
     render_board_html,
+    render_float_ask_html,
     render_greeting_html,
     render_user_bubble_html,
 )
@@ -107,22 +109,31 @@ def handle_question(question: str) -> None:
     st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
-def render_nav() -> None:
-    """상단 메뉴 버튼 줄을 그립니다."""
+VALID_PAGES = {"home", "chat", "crop", "pest", "pesticide", "region"}
 
-    with st.container(key="vbnav"):
-        columns = st.columns(len(MENU_ITEMS))
-        for column, (key, label, enabled) in zip(columns, MENU_ITEMS):
-            with column:
-                is_active = key == st.session_state.page
-                if st.button(
-                    label if enabled else f"{label} 🔒",
-                    key=f"nav_{key}",
-                    disabled=not enabled,
-                    type="primary" if is_active else "secondary",
-                ):
-                    st.session_state.page = key
-                    st.rerun()
+
+def apply_nav_query() -> None:
+    """로고·플로팅 링크(?nav=...)가 넘긴 이동 요청을 처리합니다."""
+
+    nav = st.query_params.get("nav")
+    if not nav:
+        return
+    # 다음 rerun에서 다시 덮어쓰지 않도록 파라미터를 지웁니다.
+    del st.query_params["nav"]
+    if nav in VALID_PAGES:
+        st.session_state.page = nav
+
+
+def render_header() -> None:
+    """왼쪽 로고 배너를 그립니다. '농업 정보'를 누르면 홈으로 돌아갑니다."""
+
+    st.markdown(render_board_html(), unsafe_allow_html=True)
+
+
+def render_float_menu() -> None:
+    """오른쪽 가장자리에 '농업정보 물어보기' 탭을 고정합니다."""
+
+    st.markdown(render_float_ask_html(), unsafe_allow_html=True)
 
 
 def render_sidebar() -> None:
@@ -327,7 +338,7 @@ def main() -> None:
     st.set_page_config(
         page_title="농업 정보",
         page_icon=mascot_path(),
-        layout="centered",
+        layout="wide",
     )
     st.markdown(build_css(), unsafe_allow_html=True)
 
@@ -336,13 +347,17 @@ def main() -> None:
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
     if "page" not in st.session_state:
-        st.session_state.page = "chat"
+        st.session_state.page = "home"
 
-    st.markdown(render_board_html(), unsafe_allow_html=True)
-    render_nav()
+    apply_nav_query()
+
+    render_header()
+    render_float_menu()
     render_sidebar()
 
-    if st.session_state.page == "chat":
+    if st.session_state.page == "home":
+        render_home_page()
+    elif st.session_state.page == "chat":
         render_chat_page()
     elif st.session_state.page == "crop":
         render_crop_page()

@@ -8,14 +8,18 @@ from functools import lru_cache
 from pathlib import Path
 
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "source"
 
 MASCOT_FILENAME = "mascot.png"
-BODY_FONT_FILENAME = "GangwonEduAll-Bold.woff2"
-TITLE_FONT_FILENAME = "GangwonEduAll-Bold.woff2"
+# 로고 전용 손글씨 폰트
+LOGO_FONT_FILENAME = "강원교육튼튼.ttf"
+# 일반 본문 / 강조(볼드)
+BODY_FONT_FILENAME = "KoPubWorld Dotum Medium.ttf"
+TITLE_FONT_FILENAME = "KoPubWorld Dotum Bold.ttf"
 
-BODY_FONT_FAMILY = "GangwonEduAllBold"
-TITLE_FONT_FAMILY = "GangwonEduAllBold"
+LOGO_FONT_FAMILY = "GangwonTteunTteun"
+BODY_FONT_FAMILY = "KoPubDotumMedium"
+TITLE_FONT_FAMILY = "KoPubDotumBold"
 
 
 @lru_cache(maxsize=None)
@@ -43,14 +47,23 @@ def mascot_data_uri() -> str:
     return f"data:image/png;base64,{encoded}"
 
 
+_FONT_FORMATS = {
+    ".woff2": ("font/woff2", "woff2"),
+    ".woff": ("font/woff", "woff"),
+    ".ttf": ("font/ttf", "truetype"),
+    ".otf": ("font/otf", "opentype"),
+}
+
+
 def _font_face(family: str, filename: str, weight: int) -> str:
     encoded = encode_asset(filename)
     if not encoded:
         return ""
+    mime, fmt = _FONT_FORMATS.get(Path(filename).suffix.lower(), ("font/ttf", "truetype"))
     return f"""
 @font-face {{
     font-family: '{family}';
-    src: url(data:font/woff2;base64,{encoded}) format('woff2');
+    src: url(data:{mime};base64,{encoded}) format('{fmt}');
     font-weight: {weight};
     font-display: swap;
 }}
@@ -58,10 +71,11 @@ def _font_face(family: str, filename: str, weight: int) -> str:
 
 
 def font_faces() -> str:
-    """번들된 강원교육 폰트의 @font-face 선언을 만듭니다."""
+    """번들된 폰트(로고·본문·강조)의 @font-face 선언을 만듭니다."""
 
     return "".join(
         [
+            _font_face(LOGO_FONT_FAMILY, LOGO_FONT_FILENAME, 700),
             _font_face(BODY_FONT_FAMILY, BODY_FONT_FILENAME, 400),
             _font_face(TITLE_FONT_FAMILY, TITLE_FONT_FILENAME, 700),
         ]
@@ -69,18 +83,19 @@ def font_faces() -> str:
 
 
 PALETTE = {
-    "sky_top": "#58c6f0",
-    "sky_bottom": "#b7ecfb",
-    "grass_light": "#8fd44a",
-    "grass_dark": "#4f9e22",
-    "panel_dark": "#1f2a16",
-    "panel_darker": "#162010",
-    "wood": "#b4762f",
-    "wood_dark": "#8a561c",
-    "leaf": "#7fd13b",
-    "leaf_dark": "#3f7d14",
-    "cream": "#fdf7e3",
-    "ink": "#36300f",
+    # 스마트팜코리아풍 밝은 톤: 흰 배경 + 산뜻한 초록 + 부드러운 하늘빛 포인트
+    "sky_top": "#eef7fb",
+    "sky_bottom": "#f4fbf2",
+    "grass_light": "#dff3d0",
+    "grass_dark": "#bfe6a8",
+    "panel_dark": "#ffffff",
+    "panel_darker": "#f4f9f3",
+    "wood": "#d7e8cf",
+    "wood_dark": "#bcd9ad",
+    "leaf": "#56c06a",
+    "leaf_dark": "#2f9e55",
+    "cream": "#ffffff",
+    "ink": "#2b3a2f",
 }
 
 
@@ -92,26 +107,24 @@ def build_css() -> str:
 <style>
 {font_faces()}
 
-/* ---------- 바탕: 하늘 + 구름 + 잔디 ---------- */
+/* ---------- 바탕: 밝고 산뜻한 스마트팜 톤 ---------- */
 .stApp {{
-    /* 모든 레이어가 viewport 기준(fixed)이라 아래쪽 잔디밭이 항상 화면에 붙어 있습니다. */
     background:
-        radial-gradient(ellipse 34% 150px at 22% 100%, #a6e45c 0 70%, transparent 71%),
-        radial-gradient(ellipse 30% 130px at 74% 100%, #a6e45c 0 70%, transparent 71%),
-        linear-gradient(180deg,
-            transparent 0 calc(100% - 165px),
-            {p["grass_light"]} calc(100% - 150px),
-            {p["grass_dark"]} 100%),
-        radial-gradient(circle at 12% 14%, rgba(255,255,255,.85) 0 54px, transparent 55px),
-        radial-gradient(circle at 18% 11%, rgba(255,255,255,.85) 0 38px, transparent 39px),
-        radial-gradient(circle at 79% 10%, rgba(255,255,255,.75) 0 46px, transparent 47px),
-        radial-gradient(circle at 85% 13%, rgba(255,255,255,.75) 0 32px, transparent 33px),
-        linear-gradient(180deg, {p["sky_top"]} 0%, {p["sky_bottom"]} 60%, #d8f4ff 100%);
+        radial-gradient(ellipse 60% 420px at 85% 0%, #e4f4ff 0%, transparent 60%),
+        radial-gradient(ellipse 60% 420px at 10% 0%, #e8f7e2 0%, transparent 60%),
+        linear-gradient(180deg, {p["sky_top"]} 0%, {p["sky_bottom"]} 55%, #ffffff 100%);
     background-attachment: fixed;
 }}
 
 html, body, .stApp, [class*="st-"] {{
     font-family: '{BODY_FONT_FAMILY}', 'Pretendard', sans-serif;
+    font-size: 18px;
+}}
+
+/* 강조 텍스트는 KoPub Dotum Bold로 */
+strong, b, .stMarkdown strong, .stMarkdown b {{
+    font-family: '{TITLE_FONT_FAMILY}', 'Pretendard', sans-serif;
+    font-weight: 700;
 }}
 
 /* Material 아이콘은 리거처 폰트라 본문 폰트를 덮어쓰면 글자가 그대로 보입니다. */
@@ -126,40 +139,115 @@ header[data-testid="stHeader"] {{ background: transparent; }}
 #MainMenu, footer {{ visibility: hidden; }}
 
 .block-container {{
-    max-width: 1080px;
-    padding-top: 1.2rem;
+    max-width: 1500px;
+    padding-top: 0;
     padding-bottom: 9rem;
+    padding-left: 3rem;
+    padding-right: 3rem;
 }}
 
-/* ---------- 상단 나무 간판 ---------- */
+/* ---------- 상단 간판 (밝은 화이트 헤더) ---------- */
 .vb-board {{
-    background: linear-gradient(180deg, {p["panel_dark"]} 0%, {p["panel_darker"]} 100%);
-    border: 4px solid {p["wood_dark"]};
-    border-radius: 26px;
-    box-shadow: 0 10px 0 rgba(0,0,0,.22), inset 0 2px 0 rgba(255,255,255,.08);
-    padding: 18px 26px;
-    margin-bottom: 18px;
+    background: #ffffff;
+    border: none;
+    border-radius: 24px;
+    box-shadow: 0 10px 28px rgba(79,158,34,.10);
+    padding: 22px 30px;
+    margin: 0 0 18px 0;
 }}
 
 .vb-logo {{
-    font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 44px;
+    font-family: '{LOGO_FONT_FAMILY}', '{TITLE_FONT_FAMILY}', sans-serif;
+    font-size: 48px;
     line-height: 1.1;
     letter-spacing: -1px;
-    color: #ffffff;
-    text-shadow:
-        -3px -3px 0 {p["leaf_dark"]}, 3px -3px 0 {p["leaf_dark"]},
-        -3px  3px 0 {p["leaf_dark"]}, 3px  3px 0 {p["leaf_dark"]},
-        0 7px 0 rgba(0,0,0,.35);
+    color: {p["ink"]};
     margin: 0;
 }}
-.vb-logo .vb-logo-leaf {{ color: {p["leaf"]}; }}
+.vb-logo .vb-logo-leaf {{ color: {p["leaf_dark"]}; }}
 
 .vb-tagline {{
-    color: #cfe9a6;
-    font-size: 15px;
+    color: #6b8569;
+    font-size: 18px;
     margin-top: 10px;
 }}
+
+/* 가로형 배너: 왼쪽 로고 */
+.vb-banner {{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}}
+.vb-logo-link,
+.vb-logo-link:hover,
+.vb-logo-link * {{
+    text-decoration: none !important;
+}}
+.vb-logo-link {{
+    display: inline-flex;
+    align-items: center;
+    gap: 16px;
+    cursor: pointer;
+    color: {p["ink"]} !important;
+}}
+.vb-logo-link .vb-logo {{ color: {p["ink"]} !important; }}
+.vb-logo-link .vb-logo-leaf {{ color: {p["leaf_dark"]} !important; }}
+.vb-logo-link:hover .vb-logo {{ opacity: .85; }}
+.vb-banner .vb-logo-mark {{
+    width: 56px;
+    height: 56px;
+    flex: 0 0 56px;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 2px solid #d7e8cf;
+    padding: 4px;
+}}
+
+/* 오른쪽 가장자리 고정: 농업정보 물어보기 탭 */
+.vb-float-ask,
+.vb-float-ask:hover,
+.vb-float-ask * {{
+    text-decoration: none !important;
+}}
+.vb-float-ask {{
+    position: fixed;
+    right: 0;
+    top: 40%;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 96px;
+    padding: 16px 10px;
+    background: #ffffff;
+    border: 1px solid #e4efdd;
+    border-right: none;
+    border-radius: 18px 0 0 18px;
+    box-shadow: -6px 10px 26px rgba(0,0,0,.12);
+    color: {p["ink"]};
+    font-size: 16px;
+    line-height: 1.4;
+    text-align: center;
+    text-decoration: none;
+}}
+.vb-float-ask:hover {{
+    background: #f1f9ed;
+    box-shadow: -6px 12px 30px rgba(47,158,85,.22);
+}}
+.vb-float-ic {{
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    background: linear-gradient(180deg, #e9f8e4 0%, #cdeec1 100%);
+    border: 1px solid #bfe8c6;
+}}
+.vb-float-ask {{ color: {p["ink"]} !important; }}
+.vb-float-tx {{ color: {p["ink"]} !important; font-weight: 500; }}
 
 /* ---------- 메뉴 칩 ---------- */
 .vb-menu {{
@@ -172,31 +260,30 @@ header[data-testid="stHeader"] {{ background: transparent; }}
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 16px;
+    padding: 9px 18px;
     border-radius: 999px;
-    font-size: 15px;
-    border: 2px solid rgba(255,255,255,.18);
-    background: rgba(255,255,255,.06);
-    color: #b9d79a;
+    font-size: 17px;
+    border: 2px solid #e2ecdb;
+    background: #f6faf3;
+    color: #5f7a5d;
 }}
 .vb-chip.is-active {{
-    background: linear-gradient(180deg, #a6e24f 0%, {p["leaf_dark"]} 100%);
-    border-color: #e9ffce;
-    color: #16300a;
+    background: linear-gradient(180deg, #6fcf7f 0%, {p["leaf_dark"]} 100%);
+    border-color: #bfe8c6;
+    color: #ffffff;
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    box-shadow: 0 4px 0 rgba(0,0,0,.3);
+    box-shadow: 0 6px 16px rgba(47,158,85,.28);
 }}
 .vb-chip .vb-soon {{
-    font-size: 11px;
+    font-size: 12px;
     opacity: .65;
 }}
 
-/* ---------- 대화 영역 나무 패널 ---------- */
+/* ---------- 패널 제목 ---------- */
 .vb-panel-title {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 20px;
-    color: #ffffff;
-    text-shadow: 0 2px 0 rgba(0,0,0,.35);
+    font-size: 23px;
+    color: {p["ink"]};
     margin: 4px 0 10px 6px;
 }}
 
@@ -209,25 +296,25 @@ div[data-testid="stChatMessage"] {{
 div[data-testid="stChatMessageAvatarCustom"],
 div[data-testid="stChatMessage"] img[data-testid="stChatMessageAvatarCustom"] {{
     background: #ffffff;
-    border: 3px solid {p["leaf_dark"]};
+    border: 3px solid {p["leaf"]};
     border-radius: 50%;
-    box-shadow: 0 4px 0 rgba(0,0,0,.22);
+    box-shadow: 0 4px 12px rgba(47,158,85,.18);
     overflow: hidden;
 }}
 div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] {{
     background: {p["cream"]};
-    border: 3px solid {p["wood"]};
+    border: 2px solid #e4efdd;
     border-radius: 18px;
-    padding: 14px 18px;
+    padding: 16px 20px;
     color: {p["ink"]};
-    box-shadow: 0 5px 0 rgba(0,0,0,.18);
+    box-shadow: 0 6px 18px rgba(79,158,34,.08);
 }}
 div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] p {{
-    font-size: 16px;
-    line-height: 1.75;
+    font-size: 18px;
+    line-height: 1.8;
     margin-bottom: .4rem;
 }}
-/* 사용자 말풍선: 직접 그린 초록 말풍선 */
+/* 사용자 말풍선: 초록 그라데이션 */
 .vb-user-row {{
     display: flex;
     justify-content: flex-end;
@@ -237,28 +324,28 @@ div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] p {{
 }}
 .vb-user-bubble {{
     max-width: 78%;
-    background: linear-gradient(180deg, #e8ffcd 0%, #c6ee98 100%);
-    border: 3px solid {p["leaf_dark"]};
+    background: linear-gradient(180deg, #e9f8e4 0%, #cdeec1 100%);
+    border: 2px solid {p["leaf"]};
     border-radius: 18px;
-    padding: 12px 18px;
+    padding: 14px 20px;
     color: {p["ink"]};
-    font-size: 16px;
-    line-height: 1.7;
-    box-shadow: 0 5px 0 rgba(0,0,0,.18);
+    font-size: 18px;
+    line-height: 1.75;
+    box-shadow: 0 6px 16px rgba(47,158,85,.14);
     word-break: break-word;
 }}
 .vb-user-face {{
-    flex: 0 0 44px;
-    width: 44px;
-    height: 44px;
+    flex: 0 0 46px;
+    width: 46px;
+    height: 46px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
-    background: linear-gradient(180deg, #ffd978 0%, #e8a32b 100%);
-    border: 3px solid {p["wood_dark"]};
-    box-shadow: 0 4px 0 rgba(0,0,0,.22);
+    font-size: 23px;
+    background: linear-gradient(180deg, #ffe6a3 0%, #f3bf5e 100%);
+    border: 2px solid #e6b35a;
+    box-shadow: 0 4px 12px rgba(0,0,0,.12);
 }}
 
 /* ---------- 마스코트 인사 카드 ---------- */
@@ -266,17 +353,17 @@ div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] p {{
     display: flex;
     align-items: center;
     gap: 18px;
-    background: {p["cream"]};
-    border: 4px solid {p["wood"]};
+    background: linear-gradient(180deg, #ffffff 0%, #f1f9ed 100%);
+    border: 2px solid #e4efdd;
     border-radius: 24px;
-    box-shadow: 0 8px 0 rgba(0,0,0,.2);
-    padding: 18px 22px;
+    box-shadow: 0 12px 30px rgba(79,158,34,.10);
+    padding: 20px 24px;
     margin-bottom: 14px;
 }}
 .vb-greet img {{
-    width: 92px;
-    height: 92px;
-    flex: 0 0 92px;
+    width: 94px;
+    height: 94px;
+    flex: 0 0 94px;
     animation: vb-bob 2.4s ease-in-out infinite;
 }}
 @keyframes vb-bob {{
@@ -285,14 +372,14 @@ div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] p {{
 }}
 .vb-greet-name {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 19px;
+    font-size: 22px;
     color: {p["leaf_dark"]};
     margin-bottom: 4px;
 }}
 .vb-greet-text {{
     color: {p["ink"]};
-    font-size: 15px;
-    line-height: 1.7;
+    font-size: 18px;
+    line-height: 1.75;
 }}
 
 /* ---------- 입력창 ---------- */
@@ -305,110 +392,152 @@ div[data-testid="stBottomBlockContainer"] {{
     padding-bottom: 1.4rem;
 }}
 div[data-testid="stChatInput"] {{
-    background: {p["cream"]};
-    border: 4px solid {p["wood"]};
+    background: #ffffff;
+    border: 2px solid #d7e8cf;
     border-radius: 999px;
-    box-shadow: 0 6px 0 rgba(0,0,0,.25);
+    box-shadow: 0 8px 22px rgba(79,158,34,.12);
+}}
+/* 포커스 시 빨간 테두리 대신 초록으로 */
+div[data-testid="stChatInput"]:focus-within {{
+    border-color: {p["leaf"]};
+}}
+/* 내부 래퍼(stChatInput 직속 자식 div)의 회색 배경·자체 테두리를 지워
+   pill 안에 깔끔히 들어가게 합니다. 이 테두리가 포커스 시 빨갛게 변하던 원인입니다. */
+div[data-testid="stChatInput"] > div,
+div[data-testid="stChatInput"] > div:focus-within {{
+    width: 100%;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+}}
+/* 포커스 시 어떤 내부 요소든 빨간 테두리가 보이지 않도록 모든 테두리색을 투명 처리 */
+div[data-testid="stChatInput"] div {{
+    border-color: transparent !important;
 }}
 div[data-testid="stChatInput"] textarea {{
     font-family: '{BODY_FONT_FAMILY}', sans-serif;
-    font-size: 16px;
+    font-size: 18px;
     color: {p["ink"]};
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
 }}
-div[data-testid="stChatInput"] textarea::placeholder {{ color: #a4915c; }}
+div[data-testid="stChatInput"] textarea:focus {{
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+}}
+div[data-testid="stChatInput"] textarea::placeholder {{ color: #9fb59b; }}
+/* 전송 버튼: 초록 */
+div[data-testid="stChatInput"] button {{
+    background: linear-gradient(180deg, #6fcf7f 0%, {p["leaf_dark"]} 100%) !important;
+    border-radius: 12px !important;
+}}
+div[data-testid="stChatInput"] button:hover {{
+    background: linear-gradient(180deg, #7ed98d 0%, #35ab5e 100%) !important;
+}}
+div[data-testid="stChatInput"] button svg,
+div[data-testid="stChatInput"] button [data-testid="stIconMaterial"] {{
+    color: #ffffff !important;
+    fill: #ffffff !important;
+}}
 
 /* ---------- 버튼 ---------- */
 .stButton > button {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    background: linear-gradient(180deg, #a6e24f 0%, #4f9e22 100%);
-    color: #15300a;
-    border: 3px solid #2f6a0f;
+    font-size: 17px;
+    background: linear-gradient(180deg, #6fcf7f 0%, {p["leaf_dark"]} 100%);
+    color: #ffffff;
+    border: none;
     border-radius: 999px;
-    box-shadow: 0 5px 0 rgba(0,0,0,.28);
-    padding: .45rem 1.1rem;
-    transition: transform .08s ease;
+    box-shadow: 0 6px 16px rgba(47,158,85,.26);
+    padding: .5rem 1.2rem;
+    transition: transform .08s ease, box-shadow .12s ease;
 }}
 .stButton > button:hover {{
-    background: linear-gradient(180deg, #b8ef64 0%, #5cb328 100%);
-    color: #15300a;
-    border-color: #2f6a0f;
+    background: linear-gradient(180deg, #7ed98d 0%, #35ab5e 100%);
+    color: #ffffff;
+    box-shadow: 0 8px 20px rgba(47,158,85,.34);
 }}
 .stButton > button:active {{
-    transform: translateY(4px);
-    box-shadow: 0 1px 0 rgba(0,0,0,.28);
+    transform: translateY(2px);
+    box-shadow: 0 3px 10px rgba(47,158,85,.26);
 }}
 
 /* ---------- 사이드바 ---------- */
 section[data-testid="stSidebar"] > div {{
-    background: linear-gradient(180deg, {p["panel_dark"]} 0%, {p["panel_darker"]} 100%);
-    border-right: 4px solid {p["wood_dark"]};
+    background: linear-gradient(180deg, #ffffff 0%, #f1f9ed 100%);
+    border-right: 2px solid #e4efdd;
 }}
-section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
+section[data-testid="stSidebar"] * {{ color: {p["ink"]}; }}
+section[data-testid="stSidebar"] h3 {{ color: {p["leaf_dark"]}; }}
 
 /* ---------- 상단 메뉴 (Streamlit 버튼으로 만든 칩) ---------- */
 .st-key-vbnav {{
-    background: linear-gradient(180deg, {p["panel_dark"]} 0%, {p["panel_darker"]} 100%);
-    border: 4px solid {p["wood_dark"]};
+    background: linear-gradient(180deg, #ffffff 0%, {p["panel_darker"]} 100%);
+    border: 2px solid #e4efdd;
     border-top: none;
-    border-radius: 0 0 26px 26px;
-    box-shadow: 0 10px 0 rgba(0,0,0,.22);
+    border-radius: 0 0 24px 24px;
+    box-shadow: 0 10px 28px rgba(79,158,34,.08);
     padding: 12px 18px 14px 18px;
-    margin: -22px 0 18px 0;
+    margin: -20px 0 18px 0;
 }}
 .st-key-vbnav .stButton > button {{
     width: 100%;
-    font-size: 14px;
-    padding: .4rem .5rem;
-    background: rgba(255,255,255,.06);
-    border: 2px solid rgba(255,255,255,.18);
-    color: #b9d79a;
+    font-size: 17px;
+    padding: .5rem .5rem;
+    background: #f6faf3;
+    border: 2px solid #e2ecdb;
+    color: #5f7a5d;
     box-shadow: none;
 }}
 .st-key-vbnav .stButton > button:hover {{
-    background: rgba(255,255,255,.14);
-    border-color: rgba(255,255,255,.35);
-    color: #eaffd2;
+    background: #eef6e9;
+    border-color: #cfe4c3;
+    color: {p["leaf_dark"]};
 }}
 .st-key-vbnav .stButton > button[kind="primary"] {{
-    background: linear-gradient(180deg, #a6e24f 0%, {p["leaf_dark"]} 100%);
-    border-color: #e9ffce;
-    color: #16300a;
-    box-shadow: 0 4px 0 rgba(0,0,0,.3);
+    background: linear-gradient(180deg, #6fcf7f 0%, {p["leaf_dark"]} 100%);
+    border-color: #bfe8c6;
+    color: #ffffff;
+    box-shadow: 0 6px 16px rgba(47,158,85,.28);
 }}
 
 /* ---------- 작물 선택 줄 ---------- */
 .st-key-vbcrop {{ margin-bottom: 14px; }}
 .st-key-vbcrop .stButton > button {{
     width: 100%;
-    font-size: 16px;
+    font-size: 17px;
     background: {p["cream"]};
-    border: 3px solid {p["wood"]};
+    border: 2px solid #d7e8cf;
     color: {p["ink"]};
 }}
 .st-key-vbcrop .stButton > button:hover {{
-    background: #fffdf2;
-    border-color: {p["wood_dark"]};
-    color: {p["ink"]};
+    background: #f3faef;
+    border-color: #bcd9ad;
+    color: {p["leaf_dark"]};
 }}
 .st-key-vbcrop .stButton > button[kind="primary"] {{
-    background: linear-gradient(180deg, #a6e24f 0%, {p["leaf_dark"]} 100%);
-    border-color: #2f6a0f;
-    color: #15300a;
+    background: linear-gradient(180deg, #6fcf7f 0%, {p["leaf_dark"]} 100%);
+    border-color: #bfe8c6;
+    color: #ffffff;
 }}
 
-/* ---------- 공통 크림 카드 ---------- */
+/* ---------- 공통 카드 ---------- */
 .vb-card {{
     background: {p["cream"]};
-    border: 4px solid {p["wood"]};
-    border-radius: 24px;
-    box-shadow: 0 8px 0 rgba(0,0,0,.2);
-    padding: 18px 22px;
+    border: 2px solid #e4efdd;
+    border-radius: 22px;
+    box-shadow: 0 10px 28px rgba(79,158,34,.08);
+    padding: 20px 24px;
     margin-bottom: 16px;
     color: {p["ink"]};
 }}
 .vb-card h3 {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 19px;
+    font-size: 22px;
     color: {p["leaf_dark"]};
     margin: 0 0 12px 0;
 }}
@@ -421,12 +550,12 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
     flex-wrap: wrap;
 }}
 .vb-hero-emoji {{
-    font-size: 46px;
+    font-size: 50px;
     line-height: 1;
 }}
 .vb-hero-name {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 30px;
+    font-size: 34px;
     color: {p["leaf_dark"]};
 }}
 
@@ -439,16 +568,16 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
 }}
 .vb-stat {{
     flex: 1 1 110px;
-    background: linear-gradient(180deg, #ffffff 0%, #f1e8c8 100%);
-    border: 3px solid {p["wood"]};
+    background: linear-gradient(180deg, #ffffff 0%, #eef7e8 100%);
+    border: 2px solid #dcebd3;
     border-radius: 16px;
-    padding: 10px 8px;
+    padding: 12px 8px;
     text-align: center;
 }}
-.vb-stat-label {{ font-size: 12px; color: #7a6a33; }}
+.vb-stat-label {{ font-size: 14px; color: #7a8f76; }}
 .vb-stat-value {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 24px;
+    font-size: 27px;
     color: {p["leaf_dark"]};
     line-height: 1.2;
 }}
@@ -457,19 +586,19 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
 .vb-table {{
     width: 100%;
     border-collapse: collapse;
-    font-size: 14.5px;
+    font-size: 16px;
 }}
 .vb-table th {{
     text-align: left;
-    background: #efe3bd;
-    color: #5f5218;
-    padding: 8px 10px;
-    border: 2px solid #ddcb9c;
+    background: #eef7e8;
+    color: #4f6b4a;
+    padding: 9px 11px;
+    border: 1px solid #dcebd3;
     font-weight: normal;
 }}
 .vb-table td {{
-    padding: 8px 10px;
-    border: 2px solid #e6d7af;
+    padding: 9px 11px;
+    border: 1px solid #e6efe0;
     vertical-align: top;
 }}
 .vb-table .vb-cat {{
@@ -477,7 +606,7 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
     color: {p["leaf_dark"]};
 }}
 .vb-table .vb-val {{ white-space: nowrap; font-weight: 600; }}
-.vb-table .vb-note {{ color: #6d6033; font-size: 13.5px; }}
+.vb-table .vb-note {{ color: #6b7d66; font-size: 15px; }}
 
 /* 품종 카드 */
 .vb-grid {{
@@ -486,87 +615,88 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
     gap: 12px;
 }}
 .vb-variety {{
-    background: linear-gradient(180deg, #ffffff 0%, #f6efd6 100%);
-    border: 3px solid #d8c492;
+    background: linear-gradient(180deg, #ffffff 0%, #f2f9ee 100%);
+    border: 2px solid #dcebd3;
     border-radius: 16px;
-    padding: 12px 14px;
+    padding: 14px 16px;
 }}
 .vb-variety-name {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 16px;
+    font-size: 18px;
     color: {p["leaf_dark"]};
     margin-bottom: 4px;
 }}
 .vb-tag {{
     display: inline-block;
-    font-size: 11.5px;
-    padding: 2px 9px;
+    font-size: 13px;
+    padding: 3px 11px;
     border-radius: 999px;
-    background: #e3f3c6;
-    border: 1px solid #a8cf74;
-    color: #3f6418;
+    background: #e5f4db;
+    border: 1px solid #b4dca0;
+    color: #3f6b2f;
     margin: 0 4px 4px 0;
 }}
-.vb-tag.vb-tag-sow {{ background: #ffeec2; border-color: #e0b857; color: #7a5410; }}
-.vb-tag.vb-tag-region {{ background: #d9edff; border-color: #78b4e4; color: #1c4c74; }}
-.vb-variety-desc {{ font-size: 13.5px; line-height: 1.6; color: #534a22; margin-top: 4px; }}
+.vb-tag.vb-tag-sow {{ background: #fff2d4; border-color: #ecc878; color: #8a6318; }}
+.vb-tag.vb-tag-region {{ background: #e0f0ff; border-color: #96c7ec; color: #1f567f; }}
+.vb-variety-desc {{ font-size: 15px; line-height: 1.65; color: #4c5c48; margin-top: 4px; }}
 
 /* 병해충 접이식 (1.59에서 stExpander는 details를 감싼 div입니다) */
 [data-testid="stExpander"] details {{
-    background: linear-gradient(180deg, #ffffff 0%, #f6efd6 100%) !important;
-    border: 3px solid #d8c492 !important;
+    background: linear-gradient(180deg, #ffffff 0%, #f2f9ee 100%) !important;
+    border: 2px solid #dcebd3 !important;
     border-radius: 16px !important;
     margin-bottom: 8px;
-    box-shadow: 0 4px 0 rgba(0,0,0,.14);
+    box-shadow: 0 6px 16px rgba(79,158,34,.06);
 }}
 [data-testid="stExpander"] summary {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
+    font-size: 17px;
     color: {p["leaf_dark"]} !important;
 }}
 [data-testid="stExpander"] summary:hover {{
-    background: #fffdf2 !important;
+    background: #f3faef !important;
     border-radius: 13px;
 }}
 [data-testid="stExpander"] p,
 [data-testid="stExpander"] li,
 [data-testid="stExpander"] strong {{
     color: {p["ink"]};
-    font-size: 14.5px;
-    line-height: 1.7;
+    font-size: 16px;
+    line-height: 1.75;
 }}
 [data-testid="stExpander"] strong {{ color: {p["leaf_dark"]}; }}
 
 /* ---------- 농약 검색 ---------- */
 .vb-notice {{
-    background: linear-gradient(180deg, #fff6d8 0%, #ffe9a8 100%);
-    border: 4px solid #e0a52b;
-    border-radius: 20px;
-    box-shadow: 0 6px 0 rgba(0,0,0,.18);
-    padding: 14px 18px;
+    background: linear-gradient(180deg, #fff9e6 0%, #fff0c4 100%);
+    border: 2px solid #ecc878;
+    border-radius: 18px;
+    box-shadow: 0 8px 20px rgba(220,165,43,.12);
+    padding: 16px 20px;
     margin-bottom: 14px;
-    color: #5c3f07;
-    font-size: 14.5px;
-    line-height: 1.7;
+    color: #6b4e12;
+    font-size: 16px;
+    line-height: 1.75;
 }}
 .vb-notice code {{
-    background: rgba(0,0,0,.07);
+    background: rgba(0,0,0,.06);
     border-radius: 5px;
     padding: 1px 5px;
-    font-size: 13px;
+    font-size: 14px;
 }}
-.vb-notice a {{ color: #0b5c9c; }}
+.vb-notice a {{ color: #0b6cbc; }}
 
 .st-key-vbfilter {{
     background: {p["cream"]};
-    border: 4px solid {p["wood"]};
-    border-radius: 24px;
-    box-shadow: 0 8px 0 rgba(0,0,0,.2);
-    padding: 14px 20px 6px 20px;
+    border: 2px solid #e4efdd;
+    border-radius: 22px;
+    box-shadow: 0 10px 28px rgba(79,158,34,.08);
+    padding: 16px 22px 8px 22px;
     margin-bottom: 16px;
 }}
 .st-key-vbfilter label, .st-key-vbfilter p {{
     color: {p["ink"]} !important;
-    font-size: 13.5px !important;
+    font-size: 15px !important;
 }}
 
 .vb-pest-grid {{
@@ -576,10 +706,10 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
 }}
 .vb-pest {{
     background: {p["cream"]};
-    border: 3px solid {p["wood"]};
+    border: 2px solid #e4efdd;
     border-radius: 18px;
-    box-shadow: 0 5px 0 rgba(0,0,0,.16);
-    padding: 14px 16px;
+    box-shadow: 0 8px 20px rgba(79,158,34,.07);
+    padding: 16px 18px;
     color: {p["ink"]};
 }}
 .vb-pest-head {{
@@ -590,73 +720,155 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
 }}
 .vb-pest-brand {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
-    font-size: 18px;
+    font-size: 20px;
     color: {p["leaf_dark"]};
 }}
 .vb-pest-crop {{
-    font-size: 12px;
-    background: #e3f3c6;
-    border: 1px solid #a8cf74;
+    font-size: 13px;
+    background: #e5f4db;
+    border: 1px solid #b4dca0;
     border-radius: 999px;
-    padding: 1px 9px;
-    color: #3f6418;
+    padding: 2px 10px;
+    color: #3f6b2f;
     white-space: nowrap;
 }}
 .vb-pest-product {{
-    font-size: 13px;
-    color: #6d6033;
+    font-size: 14px;
+    color: #6b7d66;
     margin: 2px 0 8px 0;
-    line-height: 1.5;
+    line-height: 1.55;
 }}
 .vb-pest-table {{ margin-top: 10px; }}
-.vb-pest-table td {{ padding: 5px 8px; font-size: 13.5px; }}
-.vb-pest-table .vb-cat {{ width: 38%; color: #7a6a33; }}
+.vb-pest-table td {{ padding: 6px 9px; font-size: 15px; }}
+.vb-pest-table .vb-cat {{ width: 38%; color: #7a8f76; }}
 
-.vb-tag.vb-tox-low {{ background: #e3f3c6; border-color: #a8cf74; color: #3f6418; }}
-.vb-tag.vb-tox-mid {{ background: #ffeec2; border-color: #e0b857; color: #7a5410; }}
-.vb-tag.vb-tox-high {{ background: #ffd9d4; border-color: #e07a68; color: #8a2c17; }}
+.vb-tag.vb-tox-low {{ background: #e5f4db; border-color: #b4dca0; color: #3f6b2f; }}
+.vb-tag.vb-tox-mid {{ background: #fff2d4; border-color: #ecc878; color: #8a6318; }}
+.vb-tag.vb-tox-high {{ background: #ffe0da; border-color: #ec8a78; color: #96331c; }}
 
 .vb-warn {{
     margin-top: 8px;
-    background: #ffe2dc;
-    border: 2px solid #e07a68;
+    background: #ffe8e2;
+    border: 1px solid #ec8a78;
     border-radius: 12px;
-    padding: 7px 10px;
-    font-size: 12.5px;
-    color: #8a2c17;
-    line-height: 1.6;
+    padding: 8px 11px;
+    font-size: 14px;
+    color: #96331c;
+    line-height: 1.65;
 }}
-.vb-warn a {{ color: #0b5c9c; }}
+.vb-warn a {{ color: #0b6cbc; }}
 
 /* ---------- 지역별 정보 ---------- */
 .vb-region-extremes {{
     margin-top: 12px;
-    font-size: 13.5px;
-    color: #6d6033;
-    line-height: 1.8;
+    font-size: 15px;
+    color: #6b7d66;
+    line-height: 1.85;
 }}
 .stAltairChart, [data-testid="stVegaLiteChart"] {{
     background: {p["cream"]};
-    border: 4px solid {p["wood"]};
+    border: 2px solid #e4efdd;
     border-radius: 20px;
-    box-shadow: 0 6px 0 rgba(0,0,0,.18);
-    padding: 14px 16px;
+    box-shadow: 0 8px 22px rgba(79,158,34,.08);
+    padding: 16px 18px;
     margin-bottom: 16px;
+}}
+
+/* ---------- 홈(랜딩) 섹션 ---------- */
+.vb-sec-head {{
+    text-align: center;
+    margin: 6px 0 20px 0;
+}}
+.vb-sec-title {{
+    font-family: '{TITLE_FONT_FAMILY}', sans-serif;
+    font-size: 34px;
+    color: {p["ink"]};
+    letter-spacing: -.5px;
+}}
+.vb-sec-accent {{ color: {p["leaf_dark"]}; }}
+.vb-sec-sub {{
+    color: #6b8569;
+    font-size: 18px;
+    margin-top: 8px;
+}}
+.vb-sec-gap {{ height: 40px; }}
+
+.vb-home-card {{
+    background: {p["cream"]};
+    border: 2px solid #e4efdd;
+    border-radius: 22px;
+    box-shadow: 0 10px 28px rgba(79,158,34,.08);
+    padding: 20px 22px;
+    margin-bottom: 8px;
+    height: 100%;
+}}
+.vb-home-head {{
+    font-family: '{TITLE_FONT_FAMILY}', sans-serif;
+    font-size: 24px;
+    color: {p["leaf_dark"]};
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #eef4e9;
+    margin-bottom: 14px;
+}}
+.vb-home-metrics {{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}}
+.vb-home-metrics-wide {{
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}}
+.vb-home-metric {{
+    background: linear-gradient(180deg, #ffffff 0%, #eef7e8 100%);
+    border: 2px solid #dcebd3;
+    border-radius: 14px;
+    padding: 12px 8px;
+    text-align: center;
+}}
+.vb-home-metric .l {{
+    font-size: 14px;
+    color: #7a8f76;
+    margin-bottom: 4px;
+}}
+.vb-home-metric .v {{
+    font-family: '{TITLE_FONT_FAMILY}', sans-serif;
+    font-size: 23px;
+    color: {p["leaf_dark"]};
+    line-height: 1.2;
+}}
+
+/* 홈 '자세히 알아보기' 버튼: 짙은 알약 버튼 */
+[class*="st-key-vbgo_"] {{ margin-top: 14px; }}
+[class*="st-key-vbgo_"] .stButton > button {{
+    background: linear-gradient(180deg, #3a4a3f 0%, #212c24 100%);
+    color: #ffffff;
+    font-size: 18px;
+    padding: .6rem 1.2rem;
+    box-shadow: 0 8px 20px rgba(33,44,36,.28);
+}}
+[class*="st-key-vbgo_"] .stButton > button:hover {{
+    background: linear-gradient(180deg, #46584b 0%, {p["leaf_dark"]} 100%);
+    color: #ffffff;
+    box-shadow: 0 10px 24px rgba(47,158,85,.3);
 }}
 
 /* ---------- 준비중 안내 카드 ---------- */
 .vb-soon-card {{
     background: {p["cream"]};
-    border: 4px dashed {p["wood"]};
-    border-radius: 24px;
-    padding: 40px 24px;
+    border: 2px dashed #bcd9ad;
+    border-radius: 22px;
+    padding: 42px 26px;
     text-align: center;
     color: {p["ink"]};
-    box-shadow: 0 8px 0 rgba(0,0,0,.18);
+    box-shadow: 0 10px 28px rgba(79,158,34,.08);
 }}
-.vb-soon-card img {{ width: 110px; margin-bottom: 12px; }}
+.vb-soon-card img {{ width: 112px; margin-bottom: 12px; }}
 .vb-soon-card h3 {{
     font-family: '{TITLE_FONT_FAMILY}', sans-serif;
+    font-size: 22px;
     color: {p["leaf_dark"]};
     margin: 0 0 6px 0;
 }}
@@ -665,6 +877,7 @@ section[data-testid="stSidebar"] * {{ color: #dff0c4; }}
 
 
 MENU_ITEMS: tuple[tuple[str, str, bool], ...] = (
+    ("home", "🏠 홈", True),
     ("chat", "🌱 물어보기", True),
     ("crop", "🥬 작물 도감", True),
     ("pest", "🐛 병해충 도감", True),
@@ -676,11 +889,26 @@ MENU_ITEMS: tuple[tuple[str, str, bool], ...] = (
 def render_board_html() -> str:
     """로고가 들어간 상단 간판을 만듭니다. 메뉴는 아래 버튼 줄이 담당합니다."""
 
-    return """
-<div class="vb-board" style="border-radius:26px 26px 0 0; box-shadow:none; margin-bottom:0;">
-    <div class="vb-logo"><span class="vb-logo-leaf">농업</span> 정보</div>
-    <div class="vb-tagline">작물·병해충·농약 질문에 근거를 찾아 답해 드려요.</div>
+    uri = mascot_data_uri()
+    badge = f"<img class='vb-logo-mark' src='{uri}' alt='' />" if uri else ""
+    return f"""
+<div class="vb-board vb-banner">
+    <a class="vb-logo-link" href="?nav=home" target="_self">
+        {badge}
+        <div class="vb-logo"><span class="vb-logo-leaf">농업</span> 정보</div>
+    </a>
 </div>
+"""
+
+
+def render_float_ask_html() -> str:
+    """오른쪽 가장자리에 고정되는 '농업정보 물어보기' 탭을 만듭니다."""
+
+    return """
+<a class="vb-float-ask" href="?nav=chat" target="_self">
+    <div class="vb-float-ic">🌱</div>
+    <div class="vb-float-tx">농업정보<br>물어보기</div>
+</a>
 """
 
 
