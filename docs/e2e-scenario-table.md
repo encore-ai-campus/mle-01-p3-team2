@@ -62,11 +62,15 @@ guardrails`. 분기 시 `retry`(HYBRID 재검색), `withhold`, `reject` 로 빠�
 
 ## 5. 실제 실행 결과 기록표 (담당자 작성)
 
+### A 담당자 공용 하네스 확인 후 실행 (2026-11-16, 최신)
+
+A 하네스는 별도 파일이 아니라 `scripts/evaluation/trace_question.py`에 통합되어 있다. `select_demo_questions()`로 `normal`, `graph_relation`, `multi_hop`을 선택하고, `run_question()`으로 같은 `build_app()` 인스턴스에서 전체 LangGraph를 실행했다. `export_csv()`와 `export_markdown()`도 사용했다. 결과 파일: `data/evaluation/b_e2e_a_harness.jsonl`, `.csv`, `.md`.
+
 | # | 유형 | 실제 route_path | 실제 visited_nodes | 실제 final_status | 통과 | trace_id | 오류/비고 |
 |---|---|---|---|---|:--:|---|---|
-| 1 | 일반 Vector | | | | | | |
-| 2 | Graph 관계 | | | | | | |
-| 3 | Hybrid Multi-hop | | | | | | |
+| 1 | 일반 Vector | `["VECTOR", "HYBRID"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → retry → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → withhold` | `WITHHELD` | FAIL | `c2fafbbe0a70a9985112412e9c7ad5ac` | VECTOR에서 HYBRID로 fallback. 최종 이유는 추대에 강한 품종을 고려하라는 생성 주장이 원문에 직접 없다는 `NOT_SUPPORTED` |
+| 2 | Graph 관계 | `["HYBRID"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → retry → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → withhold` | `WITHHELD` | FAIL | `82b89aa4e0b680650b4afc559fa5d12d` | 처음부터 HYBRID. 원문 증상은 맞지만 인용된 청크 본문에 병명이 없다는 이유로 최종 `NOT_SUPPORTED`; 그래프 관계와 병명을 결합한 주장 검증 실패 |
+| 3 | Hybrid Multi-hop | `["GRAPH"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → finalize → guardrails` | `ANSWERED` | FAIL | `9e673398e0654f881e6cd3bb17f11bc0` | 병해 3건과 PRELIMINARY_PASS 출처 인용. GRAPH→HYBRID fallback이 없고 별도 등록상태 주의 문구가 없음 |
 | 4 | 근거 부족 | | | | | | |
 | 5 | 출처 충돌 | | | | | | |
 | 6 | Guardrails 위험 | | | | | | |

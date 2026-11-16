@@ -1,0 +1,5 @@
+| # | 유형 | 실제 route_path | 실제 visited_nodes | 실제 final_status | 통과 | trace_id | 오류/비고 |
+|---:|---|---|---|---|:---:|---|---|
+| 1 | 일반 Vector | ["VECTOR", "HYBRID"] | ["input_safety", "dialog", "route", "retrieve", "verify", "prepare_evidence", "execution", "answer_cited", "verify_citations", "retry", "retrieve", "verify", "prepare_evidence", "execution", "answer_cited", "verify_citations", "withhold"] | WITHHELD |  | c2fafbbe0a70a9985112412e9c7ad5ac |  |
+| 2 | Graph 관계 | ["HYBRID"] | ["input_safety", "dialog", "route", "retrieve", "verify", "prepare_evidence", "execution", "answer_cited", "verify_citations", "retry", "retrieve", "verify", "prepare_evidence", "execution", "answer_cited", "verify_citations", "withhold"] | WITHHELD |  | 82b89aa4e0b680650b4afc559fa5d12d |  |
+| 3 | Hybrid Multi-hop | ["GRAPH"] | ["input_safety", "dialog", "route", "retrieve", "verify", "prepare_evidence", "execution", "answer_cited", "verify_citations", "finalize", "guardrails"] | ANSWERED |  | 9e673398e0654f881e6cd3bb17f11bc0 |  |
