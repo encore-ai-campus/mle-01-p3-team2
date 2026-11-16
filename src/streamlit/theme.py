@@ -553,6 +553,13 @@ section[data-testid="stSidebar"] > div {{
 }}
 section[data-testid="stSidebar"] * {{ color: {p["ink"]}; }}
 section[data-testid="stSidebar"] h3 {{ color: {p["leaf_dark"]}; }}
+section[data-testid="stSidebar"] .stButton > button,
+section[data-testid="stSidebar"] .stButton > button:hover,
+section[data-testid="stSidebar"] .stButton > button:focus,
+section[data-testid="stSidebar"] .stButton > button *,
+section[data-testid="stSidebar"] .stButton > button:hover * {{
+    color: #ffffff !important;
+}}
 
 /* ---------- 상단 메뉴 (Streamlit 버튼으로 만든 칩) ---------- */
 .st-key-vbnav {{
