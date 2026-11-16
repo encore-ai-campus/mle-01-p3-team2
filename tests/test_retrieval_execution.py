@@ -103,6 +103,25 @@ def test_execute_search_records_connection_error_without_exposing_exception_text
     assert "private endpoint details" not in str(response.warnings)
 
 
+def test_neo4j_connection_failure_cannot_produce_answerable_retrieval():
+    """Neo4j 장애는 빈 근거와 경고로 바뀌어 후속 파이프라인이 보류해야 합니다."""
+
+    class DisconnectedGraphRetriever:
+        def search(self, question, *, crop, max_hops, limit):
+            raise ServiceUnavailable("database unavailable")
+
+    response = execute_search(
+        "양파의 병해는 무엇인가요?",
+        route="GRAPH",
+        graph_retriever=DisconnectedGraphRetriever(),
+    )
+
+    assert response.results == []
+    assert "GRAPH connection error: ServiceUnavailable" in response.warnings
+    # 검색 근거가 없으므로 Supervisor가 ANSWERED로 확정할 수 없습니다.
+    assert not response.results
+
+
 def test_execute_hybrid_route_returns_vector_hits_when_graph_connection_fails():
     class DisconnectedGraphRetriever:
         def search(self, question, *, crop, max_hops, limit):
