@@ -208,7 +208,7 @@ def test_render_cited_answer_includes_title_url_and_quote():
 
     rendered = render_cited_answer(answer, [_evidence()])
 
-    assert "[1] 배추 농약 등록 정보" in rendered
+    assert "**[1]** [배추 농약 등록 정보]" in rendered
     assert "https://example.com/pesticide" in rendered
     assert "작물=배추; 병해충=무름병" in rendered
     assert "배추 → 무름병 → 등록약제" in rendered
@@ -240,4 +240,55 @@ def test_render_cited_answer_deduplicates_same_evidence_id():
 
     rendered = render_cited_answer(answer, [_evidence()])
 
-    assert rendered.count("[1] 배추 농약 등록 정보") == 1
+    assert rendered.count("**[1]** [배추 농약 등록 정보]") == 1
+
+def test_render_cited_answer_numbers_start_at_one_when_evidence_missing():
+    # 첫 인용의 evidence가 map에 없어도 출력 번호는 1부터 이어져야 한다.
+    answer = CitedAnswer(
+        answer="답변",
+        claims=[
+            Claim(
+                text="주장 1",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_MISSING",
+                        quote="map에 없는 근거",
+                    )
+                ],
+            ),
+            Claim(
+                text="주장 2",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_1",
+                        quote="사용적기=정식전",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    rendered = render_cited_answer(answer, [_evidence()])
+
+    assert "**[1]** [배추 농약 등록 정보]" in rendered
+    assert "[2]" not in rendered
+    # map에 없는 근거를 인용한 주장에는 마커가 붙지 않는다.
+    assert "- 주장 1\n" in rendered
+    assert "- 주장 2 **[1]**" in rendered
+
+def test_render_cited_answer_substitutes_inline_markers():
+    answer = CitedAnswer(
+        answer="정식 전에 사용합니다 [[EVD_1]]. 근거 없는 토큰 [[EVD_X]].",
+        claims=[
+            Claim(
+                text="사용 적기는 정식 전이다.",
+                citations=[Citation(evidence_id="EVD_1", quote="사용적기=정식전")],
+            )
+        ],
+    )
+
+    rendered = render_cited_answer(answer, [_evidence()])
+
+    assert "정식 전에 사용합니다 [1]." in rendered   # ID → 번호 치환
+    assert "[[EVD_1]]" not in rendered              # 토큰 원형 제거
+    assert "[[EVD_X]]" not in rendered              # 누락 근거 토큰 제거

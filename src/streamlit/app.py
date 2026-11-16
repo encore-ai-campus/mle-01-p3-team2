@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 import streamlit as st
-
+import logging
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -31,6 +32,10 @@ from src.streamlit.theme import (
     render_greeting_html,
     render_user_bubble_html,
 )
+from src.streamlit.chatbot import generate_answer
+from src.retrievers.answer.renderer import SOURCES_HEADING
+
+from src.retrievers.answer.renderer import SOURCES_HEADING, WITHHOLD_DETAIL_HEADING
 
 
 SAMPLE_QUESTIONS = (
@@ -42,12 +47,21 @@ SAMPLE_QUESTIONS = (
 
 # "15~25℃" 같은 범위 표기가 마크다운 취소선으로 해석되는 것을 막습니다.
 _TILDE_PATTERN = re.compile(r"(?<!\\)~")
-
+_MD_LINK_PATTERN = re.compile(r"\[[^\]]*\]\([^)]*\)")
 
 def escape_tildes(text: str) -> str:
-    """답변 안의 물결표를 마크다운이 삼키지 않도록 escape 합니다."""
+    """답변 안의 물결표를 escape 하되, 마크다운 링크 URL은 건드리지 않습니다."""
 
-    return _TILDE_PATTERN.sub(r"\\~", text)
+    # 마크다운 링크 구간을 보호하고 나머지에서만 ~ 를 escape 한다.
+    links: list[str] = []
+
+    def _stash(match: "re.Match[str]") -> str:
+        links.append(match.group(0))
+        return f"\x00{len(links) - 1}\x00"
+
+    stashed = _MD_LINK_PATTERN.sub(_stash, text)
+    escaped = _TILDE_PATTERN.sub(r"\\~", stashed)
+    return re.sub(r"\x00(\d+)\x00", lambda m: links[int(m.group(1))], escaped)
 
 
 @st.cache_resource
@@ -62,8 +76,9 @@ def ask_supervisor(question: str) -> str:
 
     try:
         supervisor, _driver = get_supervisor_resources()
-    except Exception as exc:
-        return f"챗봇을 시작하지 못했습니다: {exc}"
+    except Exception:
+        logger.exception("Supervisor 리소스 초기화 실패")
+        return "챗봇을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요."
 
     return generate_answer(supervisor, question)
 
@@ -73,12 +88,31 @@ def render_user_message(text: str) -> None:
 
     st.markdown(render_user_bubble_html(text), unsafe_allow_html=True)
 
+def render_answer_with_sources(text: str) -> None:
+    """본문은 그대로, 출처 블록은 접을 수 있는 토글로 그립니다."""
+
+    detail = ""
+    if WITHHOLD_DETAIL_HEADING in text:
+        text, detail = text.split(WITHHOLD_DETAIL_HEADING, 1)
+
+    if SOURCES_HEADING in text:
+        body, sources = text.split(SOURCES_HEADING, 1)
+        st.markdown(escape_tildes(body.strip()))
+        with st.expander("📚 출처 보기"):
+            st.markdown(escape_tildes(sources.strip()))
+    else:
+        st.markdown(escape_tildes(text))
+
+    if detail.strip():
+        with st.expander("🔎 보류 사유 자세히 보기"):
+            st.markdown(escape_tildes(detail.strip()))
+
 
 def render_assistant_message(text: str) -> None:
     """마스코트 아바타와 함께 답변 말풍선을 그립니다."""
 
     with st.chat_message("assistant", avatar=mascot_path()):
-        st.markdown(escape_tildes(text))
+        render_answer_with_sources(text)
 
 
 def render_history() -> None:
@@ -104,7 +138,7 @@ def handle_question(question: str) -> None:
     with st.chat_message("assistant", avatar=mascot_path()):
         with st.spinner("부기가 밭에서 자료를 찾아오는 중..."):
             answer = ask_supervisor(question)
-        st.markdown(escape_tildes(answer))
+        render_answer_with_sources(escape_tildes(answer))
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
 

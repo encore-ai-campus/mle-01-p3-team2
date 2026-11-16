@@ -59,7 +59,9 @@ def test_real_nemo_blocks_prompt_injection():
     })
 
     assert result["dialog_action"] == "STOP"
-    assert result["final_status"] == "WITHHELD"
+    # 인프라 오류는 정책 위반 보류(WITHHELD)와 구분해 ERROR로 표기한다.
+    # (검색에 도달하지 않으므로 fail-closed는 그대로 유지)
+    assert result["final_status"] == "ERROR"
     assert after_dialog(result) == "end"
 
 

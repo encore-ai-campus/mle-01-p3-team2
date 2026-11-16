@@ -7,43 +7,25 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from src.retrievers.answer import (
-    CitedAnswer,
-    Evidence,
-    build_evidence,
-    render_cited_answer,
-)
+from src.retrievers.answer import (CitedAnswer, Evidence, build_evidence, render_cited_answer)
 from src.retrievers.hybrid_retriever import hybrid_search
 from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
 
 from .answer_agent import AnswerAgent
-from .citation_verifier import (
-    SupportChecker,
-    repair_unknown_citation_ids,
-    verify_citations,
-)
+from .citation_verifier import (SupportChecker, repair_unknown_citation_ids, verify_citations)
 from .state import GraphState
 
 # Guardrails 연동
-from src.guardrails.input_rail import (
-    input_safety_node,
-    after_input_safety,
-)
-from src.guardrails.dialog_rail import (
-    dialog_node,
-    after_dialog,
-)
+from src.guardrails.input_rail import (input_safety_node, after_input_safety)
+from src.guardrails.dialog_rail import (dialog_node, after_dialog)
 from src.guardrails.retrieval_rail import filter_retrieval_results
-from src.guardrails.execution_adapter import (
-    execution_node,
-    after_execution,
-)
+from src.guardrails.execution_adapter import (execution_node, after_execution)
 from src.guardrails.supervisor_adapter import guardrails_node
-from src.guardrails.neo4j_pesticide_lookup import (
-    make_neo4j_pesticide_lookup,
-    make_neo4j_pesticide_usage_list,
-)
+from src.guardrails.neo4j_pesticide_lookup import (make_neo4j_pesticide_lookup, make_neo4j_pesticide_usage_list)
+
+from src.retrievers.answer import (CitedAnswer, Evidence, build_evidence, render_cited_answer)
+from src.retrievers.answer.renderer import SOURCES_HEADING, WITHHOLD_DETAIL_HEADING
 
 GraphSearch = Callable[..., list[SearchResult]]
 VectorSearch = Callable[..., list[SearchResult]]
@@ -201,6 +183,68 @@ def _build_withhold_reason(
     # 중복 사유를 제거하면서 기존 순서는 유지합니다.
     return "; ".join(dict.fromkeys(parts))
 
+def _summarize_withhold(state: GraphState) -> str:
+    """내부 코드 대신 사용자가 읽을 한 줄 설명을 만듭니다."""
+
+    if state.get("citation_conflicts"):
+        return "검색된 근거 자료들이 서로 어긋나, 하나의 답으로 확정할 수 없습니다."
+    if state.get("citation_failures"):
+        return "답변에 필요한 일부 내용을 공식 근거로 확인하지 못했습니다."
+    if state.get("dropped_evidences"):
+        return "근거 원문을 확인하지 못해 답변을 보류합니다."
+    return "질문에 답할 공식 근거를 충분히 확인하지 못했습니다."
+
+PESTICIDE_FERTILIZER_DISCLAIMER = (
+    "⚠️ 농약·비료 정보는 공식 자료 검색 결과입니다. "
+    "실제 사용 전 반드시 제품 라벨과 최신 등록사항"
+    "(PSIS·식품안전나라)을 직접 확인하세요."
+)
+
+_PESTICIDE_FERTILIZER_KEYWORDS = (
+    "농약", "약제", "살균제", "살충제", "제초제", "희석", "살포",
+    "방제", "안전사용", "수확 전", "비료", "시비", "웃거름", "밑거름",
+)
+
+
+def _needs_pesticide_disclaimer(state: GraphState, answer_text: str) -> bool:
+    """답변이 농약·비료와 관련되면 라벨 확인 안내를 붙일지 판단한다."""
+
+    if (
+        state.get("product_candidates")
+        or state.get("product_name")
+        or state.get("target_pest")
+        or state.get("execution_records")
+        or state.get("execution_record")
+    ):
+        return True
+    haystack = f"{state.get('question', '')} {answer_text}"
+    return any(kw in haystack for kw in _PESTICIDE_FERTILIZER_KEYWORDS)
+
+
+def _insert_before_sources(answer_text: str, extra: str) -> str:
+    """출처 블록(SOURCES_HEADING) 앞에 추가 블록을 끼워 넣는다.
+
+    출처가 없으면 맨 끝에 붙인다. UI에서 추가 블록이 '출처 보기'
+    토글 안으로 숨지 않도록 하기 위함이다.
+    """
+
+    extra = extra.strip()
+    if not extra:
+        return answer_text
+    if SOURCES_HEADING in answer_text:
+        body, sources = answer_text.split(SOURCES_HEADING, 1)
+        return f"{body.rstrip()}\n\n{extra}\n\n{SOURCES_HEADING}{sources}"
+    return f"{answer_text.rstrip()}\n\n{extra}"
+
+
+def _apply_answer_notices(state: GraphState, answer_text: str) -> str:
+    """ANSWERED 답변에 농약·비료 라벨 확인 안내를 자동 부착한다."""
+
+    if _needs_pesticide_disclaimer(state, answer_text):
+        return _insert_before_sources(
+            answer_text, PESTICIDE_FERTILIZER_DISCLAIMER
+        )
+    return answer_text
 
 def build_supervisor(
     *,
@@ -562,6 +606,7 @@ def build_supervisor(
             ],
             "checked_claims": result.checked_claims,
             "supported_claims": result.supported_claims,
+            "supported_claim_indices": result.supported_indices,
         }
 
     def retry_node(
@@ -640,15 +685,50 @@ def build_supervisor(
                 ),
             }
 
-        final_answer = render_cited_answer(
-            cited_answer,
-            evidences,
-        )
+        supported_idx = state.get("supported_claim_indices")
+        total = len(cited_answer.claims)
+
+        # 전부 통과(또는 인덱스 정보 없음)면 기존대로 전체 답변
+        if not supported_idx or len(supported_idx) >= total:
+            return {
+                "final_status": "ANSWERED",
+                "withhold_reason": "",
+                "final_answer": _apply_answer_notices(
+                    state, render_cited_answer(cited_answer, evidences)
+                ),
+            }
+
+        # 부분 답변: 확인된 주장만 남기고 본문도 그 주장들로 다시 구성
+        supported_set = set(supported_idx)
+        supported_claims = [
+            claim for i, claim in enumerate(cited_answer.claims)
+            if i in supported_set
+        ]
+        unsupported_texts = [
+            claim.text for i, claim in enumerate(cited_answer.claims)
+            if i not in supported_set
+        ]
+
+        partial_answer = cited_answer.model_copy(update={
+            # 본문 산문을 버리고 확인된 주장만으로 재구성(미확인 내용 누출 방지)
+            "answer": " ".join(claim.text for claim in supported_claims),
+            "claims": supported_claims,
+        })
+        body = render_cited_answer(partial_answer, evidences)
+
+        note_lines = [
+            "### ⚠️ 확인하지 못한 내용",
+            "다음은 공식 근거에서 확인하지 못해 답변에서 제외했습니다.",
+        ]
+        note_lines += [f"- {text}" for text in unsupported_texts]
+
+        # 미확인 안내를 '출처' 앞에 끼워 넣어 UI 토글에 숨지 않게 한다(#6 순서 수정).
+        body = _insert_before_sources(body, "\n".join(note_lines))
 
         return {
             "final_status": "ANSWERED",
             "withhold_reason": "",
-            "final_answer": final_answer,
+            "final_answer": _apply_answer_notices(state, body),
         }
 
     def withhold_node(
@@ -660,11 +740,13 @@ def build_supervisor(
 
         return {
             "final_status": "WITHHELD",
+            # 내부 코드 문자열은 로그·평가·테스트용으로 그대로 보존한다.
             "withhold_reason": reason,
             "final_answer": (
                 "검색 근거만으로 안전하고 정확한 답변을 "
                 "확정할 수 없어 답변을 보류합니다.\n"
                 f"사유: {reason}"
+                f"\n\n{WITHHOLD_DETAIL_HEADING}\n사유: {reason}"
             ),
         }
 
@@ -758,6 +840,12 @@ def build_supervisor(
             and retry_count < retry_limit
         ):
             return "retry"
+
+        # 재검색을 다 쓴 뒤: 일부라도 근거로 확인된 주장이 있으면
+        # 전부 버리지 않고 '확인된 것만' 답하고 나머지는 명시한다.
+        # (충돌은 맨 위에서 이미 withhold 처리됨)
+        if status == "PARTIAL" and state.get("supported_claims", 0) > 0:
+            return "finalize"
 
         return "withhold"
 

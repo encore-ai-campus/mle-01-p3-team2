@@ -59,6 +59,7 @@ class GraphState(TypedDict, total=False):
     citation_conflicts: list[dict[str, Any]]
     checked_claims: int
     supported_claims: int
+    supported_claim_indices: list[int]
 
     # 재검색 및 답변 보류
     search_query: str

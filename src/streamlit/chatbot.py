@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 FALLBACK_ANSWER = "답변을 생성하지 못했습니다. 다시 질문해 주세요."
 
@@ -19,8 +23,9 @@ def generate_answer(supervisor: Supervisor, question: str) -> str:
 
     try:
         result = supervisor.invoke({"question": question})
-    except Exception as exc:
-        return f"답변 생성 중 오류가 발생했습니다: {exc}"
+    except Exception:
+        logger.exception("Supervisor invoke 중 오류")
+        return "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
     answer = result.get("final_answer") if isinstance(result, dict) else None
     if not isinstance(answer, str) or not answer.strip():

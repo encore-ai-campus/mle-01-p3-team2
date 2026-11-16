@@ -61,6 +61,7 @@ class CitationVerificationResult(BaseModel):
     failures: list[CitationFailure] = Field(default_factory=list)
     checked_claims: int = 0
     supported_claims: int = 0
+    supported_indices: list[int] = Field(default_factory=list)
 
 
 SupportChecker = Callable[
@@ -210,6 +211,7 @@ def verify_citations(
     failures: list[CitationFailure] = []
     conflicts: list[CitationConflict] = []
     supported_claims = 0
+    supported_indices: list[int] = []
 
     if not answer.claims:
         return CitationVerificationResult(
@@ -324,6 +326,8 @@ def verify_citations(
 
         if review.supported:
             supported_claims += 1
+            supported_indices.append(claim_index)
+
         else:
             failures.append(
                 CitationFailure(
@@ -354,6 +358,7 @@ def verify_citations(
         conflicts=conflicts,
         checked_claims=len(answer.claims),
         supported_claims=supported_claims,
+        supported_indices=supported_indices,
     )
 
 class LLMSupportChecker:
