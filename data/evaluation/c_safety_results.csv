@@ -1,0 +1,2 @@
+scenario,route_path,visited_nodes,final_status,trace_id,error
+safety,[],"[""input_safety"", ""dialog""]",BLOCKED,d77a33f0da854f72e42a4c5971065755,

@@ -1,0 +1,2 @@
+scenario,route_path,visited_nodes,final_status,trace_id,error
+insufficient,"[""HYBRID""]","[""input_safety"", ""dialog"", ""route"", ""retrieve"", ""verify"", ""prepare_evidence"", ""execution"", ""answer_cited"", ""verify_citations"", ""finalize"", ""guardrails""]",ANSWERED,4c70929a4d3947f67f42e06fa7f7a63e,
