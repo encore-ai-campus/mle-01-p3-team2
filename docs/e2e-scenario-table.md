@@ -74,7 +74,7 @@ A 하네스는 별도 파일이 아니라 `scripts/evaluation/trace_question.py`
 | 4 | 근거 부족 | | | | | | |
 | 5 | 출처 충돌 | | | | | | |
 | 6 | Guardrails 위험 | | | | | | |
-| 7 | Neo4j 연결 실패 | | | | | | |
+| 7 | Neo4j 연결 실패 | `GRAPH` | `input_safety → dialog → route → retrieve → verify → withhold` | `WITHHELD` | PASS | `N/A` | pytest에서 `ServiceUnavailable` 주입. `execution.py`가 `GRAPH connection error: ServiceUnavailable`을 `warnings`에 기록했고, 임의 답변 없이 근거 부족으로 보류됨 |
 
 ## 6. 주의 — 현재 알려진 불일치
 

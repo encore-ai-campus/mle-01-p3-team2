@@ -5,6 +5,8 @@ from src.retrievers.answer import (
 )
 from src.retrievers.router import QuestionRouter
 from src.retrievers.search_result import SearchResult
+from src.retrievers.execution import execute_search
+from neo4j.exceptions import ServiceUnavailable
 from src.supervisor.citation_verifier import AnswerReview
 from src.supervisor.graph import (
     INSUFFICIENT_EVIDENCE_WARNING,
@@ -126,6 +128,54 @@ def test_supervisor_routes_and_calls_graph_worker():
     assert state["final_status"] == "ANSWERED"
     assert state["evidence_status"] == "PASS"
     assert calls[0][0] == "graph"
+
+
+def test_neo4j_connection_failure_records_warning_and_does_not_answer():
+    observed_warnings = []
+
+    def disconnected_graph(question, **kwargs):
+        raise ServiceUnavailable("database unavailable")
+
+    def graph_search(question, **kwargs):
+        response = execute_search(
+            question,
+            route="GRAPH",
+            graph_search_fn=disconnected_graph,
+            crop=kwargs.get("crop"),
+            max_hops=kwargs.get("max_hops", 2),
+            relation_types=kwargs.get("relation_types"),
+            limit=kwargs.get("limit", 10),
+        )
+        observed_warnings.extend(response.warnings)
+        return response.results
+
+    app = _build_app(
+        graph_search_fn=graph_search,
+        vector_search_fn=lambda question, **kwargs: [],
+        max_retries=0,
+    )
+    state = {}
+    visited_nodes = []
+    for update in app.stream(
+        {"question": "마늘 품종별 적합 지역은 어디인가?"},
+        stream_mode="updates",
+    ):
+        for node, values in update.items():
+            visited_nodes.append(node)
+            state.update(values)
+
+    assert "GRAPH connection error: ServiceUnavailable" in observed_warnings
+    assert state["route_path"] == ["GRAPH"]
+    assert visited_nodes == [
+        "input_safety",
+        "dialog",
+        "route",
+        "retrieve",
+        "verify",
+        "withhold",
+    ]
+    assert state["final_status"] != "ANSWERED"
+    assert state["final_answer"].startswith("검색 근거만으로")
 
 
 def test_supervisor_retries_with_hybrid_when_evidence_is_missing():
