@@ -1,4 +1,4 @@
-"""프로젝트 GraphRAG Supervisor를 사용하는 게임풍 농업 정보 앱입니다."""
+"""프로젝트 GraphRAG Supervisor를 사용하는 농업 정보 앱입니다."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ def render_answer_with_sources(text: str) -> None:
 
 
 def render_assistant_message(text: str) -> None:
-    """마스코트 아바타와 함께 답변 말풍선을 그립니다."""
+    """답변 말풍선을 그립니다."""
 
     with st.chat_message("assistant", avatar=mascot_path()):
         render_answer_with_sources(text)
@@ -126,7 +126,7 @@ def render_history() -> None:
 
 
 def handle_question(question: str) -> None:
-    """질문을 기록하고 마스코트가 답하도록 합니다."""
+    """질문을 기록하고 답변을 표시합니다."""
 
     question = question.strip()
     if not question:
@@ -175,43 +175,43 @@ def render_sidebar() -> None:
 
     with st.sidebar:
         if st.session_state.page == "crop":
-            st.markdown("### 🌿 도감 보는 법")
+            st.markdown("### 🌿 도감 이용 안내")
             st.markdown(
                 "위쪽 작물 버튼을 눌러 작물을 바꾸고, "
-                "병해·해충 항목을 펼치면 증상과 예방법을 볼 수 있어요."
+                "병해·해충 항목을 펼치면 증상과 예방법을 확인할 수 있습니다."
             )
             return
 
         if st.session_state.page == "region":
-            st.markdown("### 🗺️ 지역 보는 법")
+            st.markdown("### 🗺️ 지역 정보 이용 안내")
             st.markdown(
-                "시도와 시군구를 고르면 2024~2025년 월별 기온·강수량이 나와요. "
-                "아래쪽에는 품종 자료에 적힌 재배 권장 지역도 모아 뒀어요."
+                "시도와 시군구를 선택하면 2024~2025년 월별 기온·강수량을 확인할 수 있습니다. "
+                "아래에는 품종 자료에 포함된 재배 권장 지역도 제공합니다."
             )
             return
 
         if st.session_state.page == "pest":
-            st.markdown("### 🐛 도감 보는 법")
+            st.markdown("### 🐛 도감 이용 안내")
             st.markdown(
                 "작물과 종류로 추리거나 이름으로 찾아보세요. "
                 "항목을 펼치면 증상·생태·예방법이 나오고, "
-                "💊 표시가 있으면 등록된 약제로 바로 넘어갈 수 있어요."
+                "등록된 약제가 있으면 관련 검색 결과로 바로 이동할 수 있습니다."
             )
             return
 
         if st.session_state.page == "pesticide":
-            st.markdown("### 🧪 농약 찾는 법")
+            st.markdown("### 🧪 농약 검색 이용 안내")
             st.markdown(
-                "작물과 병해충을 고르면 등록된 약제가 나와요. "
+                "작물과 병해충을 선택하면 등록된 약제를 확인할 수 있습니다. "
                 "희석배수와 안전사용기준을 꼭 같이 확인하고, "
-                "⚠️ 표시가 붙은 건은 사용 전에 공식 조회로 확인해 주세요."
+                "주의 표시가 붙은 항목은 사용 전에 공식 조회로 확인해 주세요."
             )
             return
 
         if st.session_state.page != "chat":
             return
 
-        st.markdown("### 🌿 이런 걸 물어봐요")
+        st.markdown("### 🌿 질문 예시")
         for index, sample in enumerate(SAMPLE_QUESTIONS):
             if st.button(sample, key=f"sample_{index}", use_container_width=True):
                 st.session_state.pending_question = sample
@@ -361,16 +361,15 @@ def render_locked_page(label: str) -> None:
     uri = mascot_data_uri()
     image = f"<img src='{uri}' alt='부기'/>" if uri else ""
     st.markdown(
-        f"<div class='vb-soon-card'>{image}"
-        f"<h3>{label}은(는) 아직 준비 중이야!</h3>"
-        "<p>조금만 기다려 줘. 지금은 '물어보기'와 '작물 도감'을 쓸 수 있어.</p></div>",
+        f"<div class='vb-soon-card'>{image}<h3>{label}은(는) 준비 중입니다.</h3>"
+        "<p>현재는 '물어보기'와 '작물 도감'을 이용할 수 있습니다.</p></div>",
         unsafe_allow_html=True,
     )
 
 
 def main() -> None:
     st.set_page_config(
-        page_title="농업 정보",
+        page_title="농부의 길잡이",
         page_icon=mascot_path(),
         layout="wide",
     )

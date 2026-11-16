@@ -39,7 +39,6 @@ PURPOSE_EMOJI = {
     "기타": "📦",
 }
 
-
 @st.cache_resource(show_spinner="등록 농약 정보를 정리하는 중...")
 def get_records() -> list[PesticideRecord]:
     """등록 농약 레코드를 한 번만 만들어 캐시합니다."""
@@ -57,7 +56,7 @@ def render_notice() -> None:
     st.markdown(
         f"""
 <div class="vb-notice">
-    <b>⚠️ 이 목록은 추천이 아니라 등록 정보 조회 결과예요.</b><br>
+    <b>⚠️ 이 목록은 추천이 아닌 등록 정보 조회 결과입니다.</b><br>
     수록된 자료는 모두 검증 상태가 <code>PRELIMINARY_PASS</code> 또는
     <code>REVIEW_REQUIRED</code>라서 최신 등록 여부가 확인되지 않았어요.
     실제로 약을 치기 전에는
@@ -205,7 +204,7 @@ def render_results(found: list[PesticideRecord]) -> None:
 
     if not found:
         st.markdown(
-            "<div class='vb-soon-card'><h3>조건에 맞는 농약이 없어요</h3>"
+            "<div class='vb-soon-card'><h3>조건에 맞는 농약이 없습니다</h3>"
             "<p>필터를 조금 풀어 보거나 검색어를 지워 보세요.</p></div>",
             unsafe_allow_html=True,
         )

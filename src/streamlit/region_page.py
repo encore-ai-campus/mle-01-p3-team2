@@ -216,7 +216,7 @@ def render_weather(profile: RegionProfile) -> None:
 
     if not profile.weather:
         st.markdown(
-            "<div class='vb-soon-card'><h3>이 지역은 기상 관측이 없어요</h3>"
+            "<div class='vb-soon-card'><h3>이 지역의 기상 관측 자료가 없습니다</h3>"
             "<p>다른 시군구를 골라 보세요.</p></div>",
             unsafe_allow_html=True,
         )
@@ -248,7 +248,7 @@ def render_weather(profile: RegionProfile) -> None:
     )
     note = (
         f"<p style='font-size:13px;color:#6d6033;margin-top:8px'>"
-        f"관측 일수가 모자란 달이 {len(incomplete)}개 있어요.</p>"
+        f"관측 일수가 부족한 달이 {len(incomplete)}개 있습니다.</p>"
         if incomplete
         else ""
     )
@@ -285,7 +285,7 @@ def render_variety_regions(profiles: list[RegionProfile]) -> None:
     st.markdown(
         "<div class='vb-card'><h3>🌾 품종 적합 지역</h3>"
         "<p style='font-size:13.5px;color:#6d6033;margin:-6px 0 10px 0'>"
-        "품종 자료에 적힌 재배 권장 지역이에요. 위 시군구 목록과는 따로 적혀 있어요.</p>"
+        "품종 자료에 포함된 재배 권장 지역입니다. 위 시군구 목록과는 별도 자료입니다.</p>"
         f"<div class='vb-grid'>{''.join(cards)}</div></div>",
         unsafe_allow_html=True,
     )
