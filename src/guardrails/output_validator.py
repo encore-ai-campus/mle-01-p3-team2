@@ -283,6 +283,7 @@ def _judge_with_llm(
                 "gpt-4o-mini",
             ),
             temperature=0,
+            seed=int(os.getenv("OPENAI_SEED", "42")),
             response_format={"type": "json_object"},
             messages=[
                 {

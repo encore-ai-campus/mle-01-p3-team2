@@ -1,4 +1,4 @@
-# 핵심 E2E 시나리오 테스트표 (초안)
+# 핵심 E2E 시나리오 테스트표
 
 Streamlit 입력 → LangGraph 전체 파이프라인 → 최종 답변/보류/차단까지의 흐름을
 시나리오별로 **기대 경로·기대 근거·기대 최종 상태**로 미리 정의한 표입니다.
@@ -64,16 +64,16 @@ guardrails`. 분기 시 `retry`(HYBRID 재검색), `withhold`, `reject` 로 빠�
 
 ### A 담당자 공용 하네스 확인 후 실행 (2026-11-16, 최신)
 
-A 하네스는 별도 파일이 아니라 `scripts/evaluation/trace_question.py`에 통합되어 있다. `select_demo_questions()`로 `normal`, `graph_relation`, `multi_hop`을 선택하고, `run_question()`으로 같은 `build_app()` 인스턴스에서 전체 LangGraph를 실행했다. `export_csv()`와 `export_markdown()`도 사용했다. 결과 파일: `data/evaluation/b_e2e_a_harness.jsonl`, `.csv`, `.md`.
+A 하네스(`scripts/evaluation/trace_question.py`)로 같은 `build_app()` 인스턴스에서 전체 LangGraph를 실행한 결과다. 아래 표는 **citation_verifier 지원판정 수정(2번)·LLM seed 고정 이후** 기준이다. 라이브 trace는 최신 `data/evaluation/demo_traces.jsonl`(1·3·4번), 5·6·7번은 단위/통합 테스트에서 가져왔다. **2·6번은 코드·테스트로 통과가 확인되지만, 수정 이후의 라이브 trace는 다음 재실행에서 확보해야 한다**(trace_id = `재실행 필요`).
 
 | # | 유형 | 실제 route_path | 실제 visited_nodes | 실제 final_status | 통과 | trace_id | 오류/비고 |
 |---|---|---|---|---|:--:|---|---|
-| 1 | 일반 Vector | `["VECTOR", "HYBRID"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → retry → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → withhold` | `WITHHELD` | FAIL | `c2fafbbe0a70a9985112412e9c7ad5ac` | VECTOR에서 HYBRID로 fallback. 최종 이유는 추대에 강한 품종을 고려하라는 생성 주장이 원문에 직접 없다는 `NOT_SUPPORTED` |
-| 2 | Graph 관계 | `["HYBRID"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → retry → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → withhold` | `WITHHELD` | FAIL | `82b89aa4e0b680650b4afc559fa5d12d` | 처음부터 HYBRID. 원문 증상은 맞지만 인용된 청크 본문에 병명이 없다는 이유로 최종 `NOT_SUPPORTED`; 그래프 관계와 병명을 결합한 주장 검증 실패 |
-| 3 | Hybrid Multi-hop | `["GRAPH"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → finalize → guardrails` | `ANSWERED` | FAIL | `9e673398e0654f881e6cd3bb17f11bc0` | 병해 3건과 PRELIMINARY_PASS 출처 인용. GRAPH→HYBRID fallback이 없고 별도 등록상태 주의 문구가 없음 |
-| 4 | 근거 부족 | | | | | | |
-| 5 | 출처 충돌 | | | | | | |
-| 6 | Guardrails 위험 | | | | | | |
+| 1 | 일반 Vector | `["VECTOR"]` | `input_safety → dialog → route → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → finalize → guardrails` | `ANSWERED` | PASS | `1947cdd8ed7014d07b28b2f1372c4804` | 내서성·내습성·내병성+석회·붕소 결핍 내성 품종을 근거와 함께 인용. 이전 `WITHHELD`는 라우터의 VECTOR/GRAPH 비결정 플립 탓이며 **seed 고정(`OPENAI_SEED`)으로 안정화** |
+| 2 | Graph 관계 | `["HYBRID"]` | `… → answer_cited → verify_citations → finalize → guardrails` (기대) | `ANSWERED` (기대) | 수정 | `재실행 필요` | **코드 버그 수정.** 병명이 그래프 관계에만 있어 지원 판정이 항상 `NOT_SUPPORTED`로 떨어지던 문제 → `citation_verifier.py` 지원 판정 `source_text`를 `citable_text()`로 교체(그래프 경로 포함). 회귀 테스트 `test_support_checker_receives_graph_path_for_relation_claim` 추가. 라이브 재실행 시 `ANSWERED` trace 확보 |
+| 3 | Hybrid Multi-hop | `["GRAPH", "HYBRID"]` | `input_safety → dialog → route → retrieve → verify → retry → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → finalize → guardrails` | `ANSWERED` | PASS | `cf80d302f76decb3600f6f4c339125fc` | 병해 4건(반쪽시들음·뿌리마름·밑둥썩음·뿌리혹), `GRAPH→HYBRID` fallback 수행, `PRELIMINARY_PASS` 등록상태 주의 문구 포함 |
+| 4 | 근거 부족 | `["GRAPH", "HYBRID"]` | `input_safety → dialog → route → retrieve → verify → retry → retrieve → verify → prepare_evidence → execution → answer_cited → verify_citations → finalize → guardrails` | `ANSWERED`(헷지) | PASS | `e059b622e162e0104d84cc9d491a4d11` | **임의 날짜 미생성.** "8월 하순~9월 상순"만 제시하고 2026·평창 특정은 "확인 불가"로 명시, 있는/없는 정보 구분 |
+| 5 | 출처 충돌 | `N/A`(단위·통합 테스트) | `… → verify_citations → withhold`(통합) | `WITHHELD` | PASS | `N/A`(pytest) | `tests/test_citation_conflict_fixture.py` 2건: 충돌 Evidence 2건 → `FAIL`/conflict, 통합 실행은 **재시도 없이 즉시 `WITHHELD`** + `CONFLICT [...]` 기록, 충돌 수치(1000배/2000배) 미노출 |
+| 6 | Guardrails 위험 | 없음 | `input_safety → dialog`(차단, route/retrieve/answer 미도달) | `BLOCKED` | PASS | `재실행 필요` | `tests/test_input_rail.py` 3건이 동일 질문을 `HARMFUL_INTENT`·`BLOCKED`로 확인. `demo_traces.jsonl` 라이브 trace는 stale(`WITHHELD`) → 재실행 시 `BLOCKED` 갱신 |
 | 7 | Neo4j 연결 실패 | `GRAPH` | `input_safety → dialog → route → retrieve → verify → withhold` | `WITHHELD` | PASS | `N/A` | pytest에서 `ServiceUnavailable` 주입. `execution.py`가 `GRAPH connection error: ServiceUnavailable`을 `warnings`에 기록했고, 임의 답변 없이 근거 부족으로 보류됨 |
 
 ## 6. 주의 — 현재 알려진 불일치

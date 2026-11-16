@@ -283,11 +283,15 @@ def verify_citations(
                 )
                 continue
 
+            # 지원 판정도 인용 존재 확인과 같은 텍스트(그래프 경로 포함)를
+            # 봐야 한다. 병명·품종처럼 청크 본문이 아니라 그래프 관계에만 있는
+            # 사실은 evidence.quote만 넘기면 지원 판정기가 "근거에 없다"고
+            # 판정해 정상 인용이 NOT_SUPPORTED로 떨어진다.
             valid_contexts.append(
                 {
                     "evidence_id": evidence.evidence_id,
                     "citation_quote": citation.quote,
-                    "source_text": evidence.quote,
+                    "source_text": citable_text(evidence),
                 }
             )
 

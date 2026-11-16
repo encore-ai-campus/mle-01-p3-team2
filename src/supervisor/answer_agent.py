@@ -35,6 +35,7 @@ class AnswerAgent:
                 ChatOpenAI(
                     model=ANSWER_MODEL,
                     temperature=0,
+                    seed=int(os.getenv("OPENAI_SEED", "42")),
                 )
             )
         except Exception:

@@ -96,6 +96,7 @@ class LLMQueryAnalyzer:
             model = ChatOpenAI(
                 model="gpt-4o-mini",
                 temperature=0,
+                seed=int(os.getenv("OPENAI_SEED", "42")),
             ).with_structured_output(QueryAnalysis)
             return cls(model)
         except Exception:

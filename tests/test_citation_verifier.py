@@ -264,6 +264,67 @@ def test_citable_text_without_graph_path_is_quote_only():
     assert citable_text(evidence) == _GS025_SOURCE
 
 
+def test_support_checker_receives_graph_path_for_relation_claim():
+    """그래프 관계에만 있는 병명 주장도 지원 판정기가 경로를 받아 통과한다.
+
+    verify_citations 가 지원 판정 단계에서 evidence.quote 만 넘기면, 병명이
+    청크 본문이 아니라 그래프 관계에만 있는 경우 판정기가 "근거에 없다"고
+    보고 NOT_SUPPORTED 로 떨어진다(E2E 2번 회귀). source_text 로 citable_text
+    를 넘겨 경로가 함께 전달되는지 확인한다.
+    """
+    evidence = Evidence(
+        evidence_id="EVD_REL",
+        document_id="DOC_REL",
+        title="양파 병해 상세",
+        url="",
+        quote=(
+            "어린 유묘에서 생육이 정지되고 지상부가 시들며 "
+            "인경 내부에 검은색 가루가 보인다."
+        ),
+        source="graph",
+        graph_paths=[["양파", "깜부기병"]],
+    )
+
+    answer = CitedAnswer(
+        answer="해당 증상은 깜부기병입니다.",
+        claims=[
+            Claim(
+                text="해당 증상을 보이는 병은 깜부기병이다.",
+                citations=[
+                    Citation(
+                        evidence_id="EVD_REL",
+                        quote="그래프 경로: 양파 → 깜부기병",
+                    )
+                ],
+            )
+        ],
+    )
+
+    seen_contexts: list[dict[str, str]] = []
+
+    def support_checker(claim, contexts):
+        seen_contexts.extend(contexts)
+        # 병명이 그래프 경로로 전달되면 지원 판정이 가능하다.
+        supported = any(
+            "깜부기병" in context["source_text"]
+            for context in contexts
+        )
+        return AnswerReview(
+            supported=supported,
+            reason="그래프 관계가 병명을 뒷받침합니다."
+            if supported
+            else "근거에 병명이 없습니다.",
+        )
+
+    result = verify_citations(answer, [evidence], support_checker)
+
+    # 지원 판정기가 받은 source_text 에 그래프 경로(병명)가 있어야 한다.
+    assert seen_contexts
+    assert "깜부기병" in seen_contexts[0]["source_text"]
+    assert result.status == "PASS"
+    assert result.failures == []
+
+
 def test_gs031_repairs_unknown_id_from_unique_matching_quote():
     """존재하지 않는 ID도 인용문이 한 근거에만 있으면 안전하게 교정한다."""
     from src.supervisor.citation_verifier import repair_unknown_citation_ids

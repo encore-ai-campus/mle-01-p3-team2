@@ -64,7 +64,7 @@ def escape_tildes(text: str) -> str:
     return re.sub(r"\x00(\d+)\x00", lambda m: links[int(m.group(1))], escaped)
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_supervisor_resources():
     """Supervisor와 Neo4j 드라이버를 Streamlit 프로세스에서 재사용합니다."""
 

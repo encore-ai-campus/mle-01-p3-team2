@@ -51,4 +51,6 @@ def test_generate_answer_converts_supervisor_exception_to_user_message() -> None
 
     answer = generate_answer(BrokenSupervisor(), "질문")
 
-    assert answer == "답변 생성 중 오류가 발생했습니다: Neo4j 연결 실패"
+    # 사용자에겐 일반 안내만 보여주고, 내부 예외 내용은 노출하지 않는다.
+    assert answer == "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+    assert "Neo4j 연결 실패" not in answer
