@@ -125,7 +125,7 @@ def render_results(found: list[PestEntry]) -> None:
 
     if not found:
         st.markdown(
-            "<div class='vb-soon-card'><h3>조건에 맞는 병해충이 없어요</h3>"
+            "<div class='vb-soon-card'><h3>조건에 맞는 병해충이 없습니다</h3>"
             "<p>필터를 조금 풀어 보거나 검색어를 지워 보세요.</p></div>",
             unsafe_allow_html=True,
         )
