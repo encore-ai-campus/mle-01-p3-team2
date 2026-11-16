@@ -39,6 +39,29 @@ def test_nemo_block_stops_search():
     assert after_dialog(result) == "end"
 
 
+def test_nemo_infra_error_is_distinguished_from_policy_block():
+    """검사 실행 실패(인프라 오류)는 정책 차단과 다른 상태로 처리한다."""
+
+    from src.guardrails.nemo_dialog_adapter import (
+        NEMO_CHECK_ERROR_REASON,
+    )
+
+    with patch(
+        "src.guardrails.dialog_rail.check_nemo_dialog",
+        return_value=(False, NEMO_CHECK_ERROR_REASON),
+    ):
+        result = dialog_node({
+            "question": "마늘 노균병 예방법 알려줘",
+            "input_intent": "GENERAL",
+        })
+
+    assert result["dialog_action"] == "STOP"
+    assert result["final_status"] == "ERROR"
+    assert "일시적인 오류" in result["final_answer"]
+    assert "통과하지 못해" not in result["final_answer"]
+    assert after_dialog(result) == "end"
+
+
 def test_existing_input_block_is_preserved():
     """기존 Input Rail 차단 결과를 유지한다."""
 

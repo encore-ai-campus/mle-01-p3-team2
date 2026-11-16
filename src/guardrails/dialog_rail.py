@@ -5,7 +5,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.guardrails.nemo_dialog_adapter import check_nemo_dialog
+from src.guardrails.nemo_dialog_adapter import (
+    NEMO_CHECK_ERROR_REASON,
+    check_nemo_dialog,
+)
 
 
 SEARCH_INTENTS = {
@@ -57,6 +60,20 @@ def dialog_node(state: dict[str, Any]) -> dict[str, Any]:
     allowed, reason = check_nemo_dialog(question)
 
     if not allowed:
+        # 검사 자체를 수행하지 못한 경우(인증·네트워크 등 인프라 오류)와
+        # 질문이 정책을 위반해 차단된 경우를 구분해 메시지를 달리한다.
+        if reason == NEMO_CHECK_ERROR_REASON:
+            return {
+                "dialog_action": "STOP",
+                "guardrail_decision": "FALLBACK",
+                "guardrail_reason": reason,
+                "final_status": "ERROR",
+                "final_answer": (
+                    "일시적인 오류로 안전성 검사를 완료하지 못했습니다. "
+                    "잠시 후 다시 시도해 주세요."
+                ),
+            }
+
         return {
             "dialog_action": "STOP",
             "guardrail_decision": "FALLBACK",

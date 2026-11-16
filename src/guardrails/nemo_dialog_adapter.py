@@ -3,12 +3,20 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
 
 
+logger = logging.getLogger(__name__)
+
 CONFIG_DIR = Path(__file__).resolve().parent / "nemo"
+
+# NeMo 검사 자체를 수행하지 못했을 때(LLM 인증 실패·네트워크 오류 등)
+# 반환하는 사유. 사용자 질문이 정책을 위반해서 막힌 것과 구분하기 위해
+# 별도 상수로 두고 dialog_rail에서 메시지를 다르게 처리한다.
+NEMO_CHECK_ERROR_REASON = "NeMo 입력 정책 검사를 완료하지 못했습니다."
 
 
 # 명확한 보안 검사 우회 명령 탐지
@@ -99,4 +107,10 @@ def check_nemo_dialog(question: str) -> tuple[bool, str]:
         return False, "NeMo 입력 정책에서 요청을 차단하거나 변경했습니다."
 
     except Exception:
-        return False, "NeMo 입력 정책 검사를 완료하지 못했습니다."
+        # LLM 인증 실패(401)·네트워크 장애 등 인프라 오류.
+        # 질문 내용과 무관하므로 정책 위반 차단과 구분해 로그를 남긴다.
+        logger.warning(
+            "NeMo 입력 안전성 검사 실행 실패 (인프라 오류 추정)",
+            exc_info=True,
+        )
+        return False, NEMO_CHECK_ERROR_REASON
