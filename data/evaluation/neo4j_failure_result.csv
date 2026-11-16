@@ -1,0 +1,2 @@
+scenario,route_path,visited_nodes,final_status,trace_id,error
+normal,"[""VECTOR""]","[""input_safety"", ""dialog"", ""route""]",ERROR,c424d726e3a3acf4ebdcbb73e8397601,"{""error_type"": ""DriverError"", ""error_message"": ""Driver closed""}"
